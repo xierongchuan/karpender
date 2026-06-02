@@ -8,7 +8,7 @@ use std::{
 
 use crate::{
     audio::{self, AudioDevice, AudioEngine, AudioEvent},
-    config::{self, AppConfig},
+    config::{self, AppConfig, VoiceMode, VoiceProfile},
     dsp::SharedDspParams,
 };
 
@@ -22,6 +22,7 @@ impl MainWindow {
             devices: Vec::new(),
             config: config::load(),
             engine: None,
+            updating_controls: false,
         }));
 
         let dsp_params = SharedDspParams::new();
@@ -54,6 +55,21 @@ impl MainWindow {
         let output_label = gtk::Label::new(Some("Output Virtual Mic: Karpender Privacy Voice Mic"));
         output_label.set_halign(gtk::Align::Start);
         content.append(&output_label);
+
+        let profile_row = gtk::Box::new(Orientation::Horizontal, 8);
+        let profile_dropdown = gtk::DropDown::from_strings(&["Manual Settings"]);
+        profile_dropdown.set_hexpand(true);
+        let add_profile_button = gtk::Button::with_label("Add");
+        let delete_profile_button = gtk::Button::with_label("Delete");
+        profile_row.append(&profile_dropdown);
+        profile_row.append(&add_profile_button);
+        profile_row.append(&delete_profile_button);
+        content.append(&labeled_widget("Profile", &profile_row));
+
+        let voice_mode = gtk::DropDown::from_strings(&voice_mode_labels());
+        voice_mode.set_selected(voice_mode_index(state.borrow().config.voice_mode) as u32);
+        voice_mode.set_hexpand(true);
+        content.append(&labeled_widget("Processing Type", &voice_mode));
 
         let level = gtk::LevelBar::for_interval(0.0, 1.0);
         level.set_value(0.0);
@@ -96,13 +112,17 @@ impl MainWindow {
             .application(app)
             .title("Karpender")
             .default_width(460)
-            .default_height(540)
+            .default_height(620)
             .content(&toast_overlay)
             .build();
 
         let ui = UiControls {
             toast_overlay,
             device_dropdown,
+            profile_dropdown,
+            add_profile_button,
+            delete_profile_button,
+            voice_mode,
             level,
             gain,
             noise_gate,
@@ -113,6 +133,7 @@ impl MainWindow {
         };
 
         refresh_devices(&state, &ui);
+        rebuild_profile_dropdown(&state, &ui);
         connect_control_handlers(&state, &ui, Arc::clone(&dsp_params));
         connect_start_stop(&state, &ui, dsp_params);
 
@@ -128,12 +149,17 @@ struct WindowState {
     devices: Vec<AudioDevice>,
     config: AppConfig,
     engine: Option<AudioEngine>,
+    updating_controls: bool,
 }
 
 #[derive(Clone)]
 struct UiControls {
     toast_overlay: adw::ToastOverlay,
     device_dropdown: gtk::DropDown,
+    profile_dropdown: gtk::DropDown,
+    add_profile_button: gtk::Button,
+    delete_profile_button: gtk::Button,
+    voice_mode: gtk::DropDown,
     level: gtk::LevelBar,
     gain: gtk::Scale,
     noise_gate: gtk::Scale,
@@ -194,40 +220,156 @@ fn connect_control_handlers(
         config::save(&state.config);
     });
 
+    let state_for_profile = Rc::clone(state);
+    let ui_for_profile = ui.clone();
+    let params_for_profile = Arc::clone(&dsp_params);
+    ui.profile_dropdown
+        .connect_selected_notify(move |dropdown| {
+            if state_for_profile.borrow().updating_controls {
+                return;
+            }
+
+            let selected = dropdown.selected() as usize;
+            if selected == 0 {
+                state_for_profile.borrow_mut().config.active_profile_id = None;
+                config::save(&state_for_profile.borrow().config);
+                update_profile_delete_sensitivity(&state_for_profile, &ui_for_profile);
+                return;
+            }
+
+            let Some(profile) = profile_for_index(&state_for_profile.borrow().config, selected)
+            else {
+                return;
+            };
+
+            {
+                let mut state = state_for_profile.borrow_mut();
+                state.updating_controls = true;
+                state.config.apply_profile(&profile);
+                config::save(&state.config);
+            }
+
+            apply_config_to_dsp(&state_for_profile.borrow().config, &params_for_profile);
+            apply_config_to_controls(&state_for_profile.borrow().config, &ui_for_profile);
+            state_for_profile.borrow_mut().updating_controls = false;
+            update_profile_delete_sensitivity(&state_for_profile, &ui_for_profile);
+        });
+
+    let state_for_add_profile = Rc::clone(state);
+    let ui_for_add_profile = ui.clone();
+    ui.add_profile_button.connect_clicked(move |_| {
+        {
+            let mut state = state_for_add_profile.borrow_mut();
+            let number = next_custom_profile_number(&state.config);
+            let id = format!("custom-profile-{number}");
+            let name = format!("Custom Profile {number}");
+            let profile = state.config.profile_from_current(id.clone(), name);
+
+            state.config.profiles.push(profile);
+            state.config.active_profile_id = Some(id);
+            config::save(&state.config);
+        }
+
+        rebuild_profile_dropdown(&state_for_add_profile, &ui_for_add_profile);
+    });
+
+    let state_for_delete_profile = Rc::clone(state);
+    let ui_for_delete_profile = ui.clone();
+    ui.delete_profile_button.connect_clicked(move |_| {
+        let selected = ui_for_delete_profile.profile_dropdown.selected() as usize;
+        let Some(index) = custom_profile_index(&state_for_delete_profile.borrow().config, selected)
+        else {
+            return;
+        };
+
+        {
+            let mut state = state_for_delete_profile.borrow_mut();
+            state.config.profiles.remove(index);
+            state.config.active_profile_id = None;
+            config::save(&state.config);
+        }
+
+        rebuild_profile_dropdown(&state_for_delete_profile, &ui_for_delete_profile);
+    });
+
+    let state_for_voice_mode = Rc::clone(state);
+    let ui_for_voice_mode = ui.clone();
+    let params_for_voice_mode = Arc::clone(&dsp_params);
+    ui.voice_mode.connect_selected_notify(move |dropdown| {
+        if state_for_voice_mode.borrow().updating_controls {
+            return;
+        }
+
+        let mode = voice_mode_from_index(dropdown.selected() as usize);
+        params_for_voice_mode.set_voice_mode(mode);
+        state_for_voice_mode.borrow_mut().config.voice_mode = mode;
+        state_for_voice_mode.borrow_mut().config.active_profile_id = None;
+        config::save(&state_for_voice_mode.borrow().config);
+        select_manual_profile(&state_for_voice_mode, &ui_for_voice_mode);
+    });
+
     let state_for_gain = Rc::clone(state);
+    let ui_for_gain = ui.clone();
     let params_for_gain = Arc::clone(&dsp_params);
     ui.gain.connect_value_changed(move |scale| {
+        if state_for_gain.borrow().updating_controls {
+            return;
+        }
+
         let value = scale.value() as f32;
         params_for_gain.set_gain(value);
         state_for_gain.borrow_mut().config.gain = value;
+        state_for_gain.borrow_mut().config.active_profile_id = None;
         config::save(&state_for_gain.borrow().config);
+        select_manual_profile(&state_for_gain, &ui_for_gain);
     });
 
     let state_for_gate = Rc::clone(state);
+    let ui_for_gate = ui.clone();
     let params_for_gate = Arc::clone(&dsp_params);
     ui.noise_gate.connect_value_changed(move |scale| {
+        if state_for_gate.borrow().updating_controls {
+            return;
+        }
+
         let value = scale.value() as f32;
         params_for_gate.set_noise_gate(value);
         state_for_gate.borrow_mut().config.noise_gate = value;
+        state_for_gate.borrow_mut().config.active_profile_id = None;
         config::save(&state_for_gate.borrow().config);
+        select_manual_profile(&state_for_gate, &ui_for_gate);
     });
 
     let state_for_robot = Rc::clone(state);
+    let ui_for_robot = ui.clone();
     let params_for_robot = Arc::clone(&dsp_params);
     ui.robot.connect_value_changed(move |scale| {
+        if state_for_robot.borrow().updating_controls {
+            return;
+        }
+
         let value = scale.value() as f32;
         params_for_robot.set_robot_amount(value);
         state_for_robot.borrow_mut().config.robot_amount = value;
+        state_for_robot.borrow_mut().config.active_profile_id = None;
         config::save(&state_for_robot.borrow().config);
+        select_manual_profile(&state_for_robot, &ui_for_robot);
     });
 
     let state_for_monotone = Rc::clone(state);
+    let ui_for_monotone = ui.clone();
     let params_for_monotone = Arc::clone(&dsp_params);
     ui.monotone.connect_active_notify(move |switch| {
+        if state_for_monotone.borrow().updating_controls {
+            return;
+        }
+
         let enabled = switch.is_active();
         params_for_monotone.set_monotone(enabled);
         state_for_monotone.borrow_mut().config.monotone = enabled;
+        state_for_monotone.borrow_mut().config.active_profile_id = None;
         config::save(&state_for_monotone.borrow().config);
+        select_manual_profile(&state_for_monotone, &ui_for_monotone);
     });
 
     let state_for_monitor = Rc::clone(state);
@@ -348,4 +490,140 @@ fn apply_config_to_dsp(config: &AppConfig, dsp_params: &SharedDspParams) {
     dsp_params.set_noise_gate(config.noise_gate);
     dsp_params.set_robot_amount(config.robot_amount);
     dsp_params.set_monotone(config.monotone);
+    dsp_params.set_voice_mode(config.voice_mode);
+}
+
+fn apply_config_to_controls(config: &AppConfig, ui: &UiControls) {
+    ui.voice_mode
+        .set_selected(voice_mode_index(config.voice_mode) as u32);
+    ui.gain.set_value(config.gain as f64);
+    ui.noise_gate.set_value(config.noise_gate as f64);
+    ui.robot.set_value(config.robot_amount as f64);
+    ui.monotone.set_active(config.monotone);
+}
+
+fn rebuild_profile_dropdown(state: &Rc<RefCell<WindowState>>, ui: &UiControls) {
+    let labels = profile_labels(&state.borrow().config);
+    let label_refs = labels.iter().map(String::as_str).collect::<Vec<_>>();
+    let model = gtk::StringList::new(&label_refs);
+    ui.profile_dropdown.set_model(Some(&model));
+
+    let selected = selected_profile_index(&state.borrow().config);
+    {
+        let mut state = state.borrow_mut();
+        state.updating_controls = true;
+    }
+    ui.profile_dropdown.set_selected(selected as u32);
+    state.borrow_mut().updating_controls = false;
+    update_profile_delete_sensitivity(state, ui);
+}
+
+fn profile_labels(config: &AppConfig) -> Vec<String> {
+    let mut labels = vec!["Manual Settings".to_string()];
+    labels.extend(
+        config::built_in_profiles()
+            .into_iter()
+            .map(|profile| profile.name),
+    );
+    labels.extend(config.profiles.iter().map(|profile| profile.name.clone()));
+    labels
+}
+
+fn selected_profile_index(config: &AppConfig) -> usize {
+    let Some(active_id) = config.active_profile_id.as_deref() else {
+        return 0;
+    };
+
+    let built_ins = config::built_in_profiles();
+    if let Some(index) = built_ins
+        .iter()
+        .position(|profile| profile.id.as_str() == active_id)
+    {
+        return index + 1;
+    }
+
+    config
+        .profiles
+        .iter()
+        .position(|profile| profile.id.as_str() == active_id)
+        .map(|index| index + 1 + built_ins.len())
+        .unwrap_or(0)
+}
+
+fn profile_for_index(config: &AppConfig, selected: usize) -> Option<VoiceProfile> {
+    let built_ins = config::built_in_profiles();
+    if selected == 0 {
+        return None;
+    }
+
+    let built_in_index = selected - 1;
+    if built_in_index < built_ins.len() {
+        return Some(built_ins[built_in_index].clone());
+    }
+
+    let custom_index = built_in_index - built_ins.len();
+    config.profiles.get(custom_index).cloned()
+}
+
+fn custom_profile_index(config: &AppConfig, selected: usize) -> Option<usize> {
+    let built_in_count = config::built_in_profiles().len();
+    selected.checked_sub(built_in_count + 1).and_then(|index| {
+        if index < config.profiles.len() {
+            Some(index)
+        } else {
+            None
+        }
+    })
+}
+
+fn next_custom_profile_number(config: &AppConfig) -> usize {
+    (1..)
+        .find(|number| {
+            let id = format!("custom-profile-{number}");
+            !config.profiles.iter().any(|profile| profile.id == id)
+        })
+        .unwrap_or(1)
+}
+
+fn select_manual_profile(state: &Rc<RefCell<WindowState>>, ui: &UiControls) {
+    {
+        let mut state = state.borrow_mut();
+        state.updating_controls = true;
+    }
+    ui.profile_dropdown.set_selected(0);
+    state.borrow_mut().updating_controls = false;
+    update_profile_delete_sensitivity(state, ui);
+}
+
+fn update_profile_delete_sensitivity(state: &Rc<RefCell<WindowState>>, ui: &UiControls) {
+    let selected = ui.profile_dropdown.selected() as usize;
+    ui.delete_profile_button
+        .set_sensitive(custom_profile_index(&state.borrow().config, selected).is_some());
+}
+
+fn voice_mode_labels() -> [&'static str; 4] {
+    [
+        "Masked Voice",
+        "Bright Stranger",
+        "Deep Morph",
+        "Cinematic High",
+    ]
+}
+
+fn voice_mode_index(mode: VoiceMode) -> usize {
+    match mode {
+        VoiceMode::Masked => 0,
+        VoiceMode::BrightStranger => 1,
+        VoiceMode::DeepMorph => 2,
+        VoiceMode::CinematicHigh => 3,
+    }
+}
+
+fn voice_mode_from_index(index: usize) -> VoiceMode {
+    match index {
+        1 => VoiceMode::BrightStranger,
+        2 => VoiceMode::DeepMorph,
+        3 => VoiceMode::CinematicHigh,
+        _ => VoiceMode::Masked,
+    }
 }
