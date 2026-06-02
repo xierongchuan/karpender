@@ -1,3 +1,9 @@
+mod app;
+mod audio;
+mod config;
+mod dsp;
+mod ui;
+
 fn main() {
-    println!("Hello, world!");
+    app::run();
 }
