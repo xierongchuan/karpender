@@ -68,7 +68,7 @@ impl MainWindow {
         let noise_gate = gtk::Scale::with_range(Orientation::Horizontal, 0.0, 0.4, 0.005);
         noise_gate.set_value(state.borrow().config.noise_gate as f64);
         noise_gate.set_hexpand(true);
-        content.append(&labeled_widget("Noise Gate", &noise_gate));
+        content.append(&labeled_widget("Noise Cleanup", &noise_gate));
 
         let robot = gtk::Scale::with_range(Orientation::Horizontal, 0.0, 1.0, 0.01);
         robot.set_value(state.borrow().config.robot_amount as f64);
@@ -79,7 +79,7 @@ impl MainWindow {
             .active(state.borrow().config.monotone)
             .halign(gtk::Align::End)
             .build();
-        content.append(&labeled_widget("Monotone", &monotone));
+        content.append(&labeled_widget("Flatten Intonation", &monotone));
 
         let monitor_output = gtk::Switch::builder()
             .active(state.borrow().config.monitor_output)

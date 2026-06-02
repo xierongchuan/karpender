@@ -18,7 +18,7 @@ impl Default for AppConfig {
             input_node_id: None,
             gain: 1.0,
             noise_gate: 0.03,
-            robot_amount: 0.65,
+            robot_amount: 0.55,
             monotone: false,
             monitor_output: false,
         }
