@@ -8,6 +8,8 @@ pub struct AppConfig {
     pub noise_gate: f32,
     pub robot_amount: f32,
     pub monotone: bool,
+    #[serde(default)]
+    pub monitor_output: bool,
 }
 
 impl Default for AppConfig {
@@ -18,6 +20,7 @@ impl Default for AppConfig {
             noise_gate: 0.03,
             robot_amount: 0.65,
             monotone: false,
+            monitor_output: false,
         }
     }
 }

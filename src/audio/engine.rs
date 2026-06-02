@@ -38,14 +38,20 @@ impl AudioEngine {
         input_node_id: u32,
         dsp_params: Arc<SharedDspParams>,
         event_sender: Sender<AudioEvent>,
+        monitor_output: bool,
     ) -> Result<Self> {
         let stop = Arc::new(AtomicBool::new(false));
         let thread_stop = Arc::clone(&stop);
         let handle = thread::Builder::new()
             .name("privacy-voice-pipewire".to_string())
             .spawn(move || {
-                let result =
-                    run_pipewire(input_node_id, dsp_params, event_sender.clone(), thread_stop);
+                let result = run_pipewire(
+                    input_node_id,
+                    dsp_params,
+                    event_sender.clone(),
+                    thread_stop,
+                    monitor_output,
+                );
                 if let Err(error) = result {
                     let _ = event_sender.send(AudioEvent::Error(error.to_string()));
                 }
@@ -77,6 +83,7 @@ fn run_pipewire(
     dsp_params: Arc<SharedDspParams>,
     event_sender: Sender<AudioEvent>,
     stop: Arc<AtomicBool>,
+    monitor_output: bool,
 ) -> Result<()> {
     pw::init();
 
@@ -87,16 +94,24 @@ fn run_pipewire(
     let core = context
         .connect_rc(None)
         .context("failed to connect to PipeWire")?;
-    let sample_queue = Arc::new(Mutex::new(VecDeque::<f32>::with_capacity(4096)));
+    let virtual_queue = Arc::new(Mutex::new(VecDeque::<f32>::with_capacity(4096)));
+    let monitor_queue =
+        monitor_output.then(|| Arc::new(Mutex::new(VecDeque::<f32>::with_capacity(4096))));
 
     let capture_stream = create_capture_stream(
         &core,
         input_node_id,
-        &sample_queue,
+        &virtual_queue,
+        monitor_queue.as_ref(),
         &dsp_params,
         &event_sender,
     )?;
-    let source_stream = create_virtual_source_stream(&core, &sample_queue, &event_sender)?;
+    let source_stream = create_virtual_source_stream(&core, &virtual_queue, &event_sender)?;
+    let monitor_stream = if let Some(queue) = &monitor_queue {
+        Some(create_monitor_stream(&core, queue, &event_sender)?)
+    } else {
+        None
+    };
 
     let timer_sender = event_sender.clone();
     let stop_for_timer = Arc::clone(&stop);
@@ -118,6 +133,7 @@ fn run_pipewire(
     let _ = event_sender.send(AudioEvent::Started);
     mainloop.run();
 
+    drop(monitor_stream);
     drop(source_stream);
     drop(capture_stream);
 
@@ -127,7 +143,8 @@ fn run_pipewire(
 fn create_capture_stream<'c>(
     core: &'c pw::core::Core,
     input_node_id: u32,
-    sample_queue: &Arc<Mutex<VecDeque<f32>>>,
+    virtual_queue: &Arc<Mutex<VecDeque<f32>>>,
+    monitor_queue: Option<&Arc<Mutex<VecDeque<f32>>>>,
     dsp_params: &Arc<SharedDspParams>,
     event_sender: &Sender<AudioEvent>,
 ) -> Result<RegisteredCaptureStream<'c>> {
@@ -146,7 +163,8 @@ fn create_capture_stream<'c>(
     let stream = pw::stream::StreamBox::new(core, "privacy-voice-capture", stream_props)
         .context("failed to create capture stream")?;
 
-    let queue = Arc::clone(sample_queue);
+    let virtual_queue = Arc::clone(virtual_queue);
+    let monitor_queue = monitor_queue.map(Arc::clone);
     let params = Arc::clone(dsp_params);
     let events = event_sender.clone();
     let state_events = event_sender.clone();
@@ -197,23 +215,25 @@ fn create_capture_stream<'c>(
 
             let processor = &mut user_data.processor;
             let mut peak = 0.0_f32;
-            if let Ok(mut queue) = queue.try_lock() {
-                for frame in readable.chunks_exact(frame_bytes) {
-                    let mut mono = 0.0_f32;
-                    for channel in 0..n_channels {
-                        let start = channel * SAMPLE_SIZE;
-                        let bytes = &frame[start..start + SAMPLE_SIZE];
-                        mono += f32::from_le_bytes(bytes.try_into().unwrap_or([0; SAMPLE_SIZE]));
-                    }
-                    mono /= n_channels as f32;
+            for frame in readable.chunks_exact(frame_bytes) {
+                let mut mono = 0.0_f32;
+                for channel in 0..n_channels {
+                    let start = channel * SAMPLE_SIZE;
+                    let bytes = &frame[start..start + SAMPLE_SIZE];
+                    mono += f32::from_le_bytes(bytes.try_into().unwrap_or([0; SAMPLE_SIZE]));
+                }
+                mono /= n_channels as f32;
 
-                    let processed = processor.process_sample(mono, &params);
-                    peak = peak.max(processed.abs());
+                let processed = processor.process_sample(mono, &params);
+                peak = peak.max(processed.abs());
 
-                    if queue.len() >= MAX_BUFFERED_SAMPLES {
-                        queue.pop_front();
+                if let Ok(mut queue) = virtual_queue.try_lock() {
+                    push_sample(&mut queue, processed);
+                }
+                if let Some(monitor_queue) = &monitor_queue {
+                    if let Ok(mut queue) = monitor_queue.try_lock() {
+                        push_sample(&mut queue, processed);
                     }
-                    queue.push_back(processed);
                 }
             }
 
@@ -240,6 +260,63 @@ fn create_capture_stream<'c>(
         .context("failed to connect capture stream")?;
 
     Ok(RegisteredCaptureStream {
+        _stream: stream,
+        _listener: listener,
+    })
+}
+
+fn create_monitor_stream<'c>(
+    core: &'c pw::core::Core,
+    sample_queue: &Arc<Mutex<VecDeque<f32>>>,
+    event_sender: &Sender<AudioEvent>,
+) -> Result<RegisteredMonitorStream<'c>> {
+    let mut stream_props = properties! {
+        *pw::keys::MEDIA_TYPE => "Audio",
+        *pw::keys::MEDIA_CATEGORY => "Playback",
+        *pw::keys::MEDIA_ROLE => "Communication",
+        *pw::keys::NODE_NAME => "PrivacyVoiceMonitor",
+        *pw::keys::NODE_DESCRIPTION => "Privacy Voice Monitor",
+    };
+    stream_props.insert("audio.rate", DEFAULT_SAMPLE_RATE.to_string());
+    stream_props.insert("audio.channels", CHANNELS.to_string());
+    stream_props.insert("audio.format", "F32LE");
+
+    let stream = pw::stream::StreamBox::new(core, "Privacy Voice Monitor", stream_props)
+        .context("failed to create monitor playback stream")?;
+
+    let queue = Arc::clone(sample_queue);
+    let state_events = event_sender.clone();
+    let listener = stream
+        .add_local_listener_with_user_data(())
+        .state_changed(move |_, _, _, new| {
+            if let pw::stream::StreamState::Error(error) = new {
+                let _ = state_events.send(AudioEvent::Error(format!(
+                    "monitor playback stream failed: {error}"
+                )));
+            }
+        })
+        .process(move |stream, _| fill_output_buffer(stream, &queue))
+        .register()
+        .context("failed to register monitor playback listener")?;
+
+    let mut audio_info = spa::param::audio::AudioInfoRaw::new();
+    audio_info.set_format(spa::param::audio::AudioFormat::F32LE);
+    audio_info.set_rate(DEFAULT_SAMPLE_RATE);
+    audio_info.set_channels(CHANNELS);
+    let mut params = audio_params(audio_info)?;
+
+    stream
+        .connect(
+            spa::utils::Direction::Output,
+            None,
+            pw::stream::StreamFlags::AUTOCONNECT
+                | pw::stream::StreamFlags::MAP_BUFFERS
+                | pw::stream::StreamFlags::RT_PROCESS,
+            &mut params,
+        )
+        .context("failed to connect monitor playback stream")?;
+
+    Ok(RegisteredMonitorStream {
         _stream: stream,
         _listener: listener,
     })
@@ -277,36 +354,7 @@ fn create_virtual_source_stream<'c>(
                 )));
             }
         })
-        .process(move |stream, _| {
-            let Some(mut buffer) = stream.dequeue_buffer() else {
-                return;
-            };
-            let datas = buffer.datas_mut();
-            if datas.is_empty() {
-                return;
-            }
-
-            let data = &mut datas[0];
-            let Some(slice) = data.data() else {
-                return;
-            };
-
-            let n_frames = slice.len() / SAMPLE_SIZE;
-            if let Ok(mut queue) = queue.try_lock() {
-                for frame_index in 0..n_frames {
-                    let sample = queue.pop_front().unwrap_or(0.0);
-                    let start = frame_index * SAMPLE_SIZE;
-                    slice[start..start + SAMPLE_SIZE].copy_from_slice(&sample.to_le_bytes());
-                }
-            } else {
-                slice.fill(0);
-            }
-
-            let chunk = data.chunk_mut();
-            *chunk.offset_mut() = 0;
-            *chunk.stride_mut() = SAMPLE_SIZE as _;
-            *chunk.size_mut() = (n_frames * SAMPLE_SIZE) as _;
-        })
+        .process(move |stream, _| fill_output_buffer(stream, &queue))
         .register()
         .context("failed to register virtual microphone listener")?;
 
@@ -331,6 +379,44 @@ fn create_virtual_source_stream<'c>(
         _stream: stream,
         _listener: listener,
     })
+}
+
+fn fill_output_buffer(stream: &pw::stream::Stream, sample_queue: &Arc<Mutex<VecDeque<f32>>>) {
+    let Some(mut buffer) = stream.dequeue_buffer() else {
+        return;
+    };
+    let datas = buffer.datas_mut();
+    if datas.is_empty() {
+        return;
+    }
+
+    let data = &mut datas[0];
+    let Some(slice) = data.data() else {
+        return;
+    };
+
+    let n_frames = slice.len() / SAMPLE_SIZE;
+    if let Ok(mut queue) = sample_queue.try_lock() {
+        for frame_index in 0..n_frames {
+            let sample = queue.pop_front().unwrap_or(0.0);
+            let start = frame_index * SAMPLE_SIZE;
+            slice[start..start + SAMPLE_SIZE].copy_from_slice(&sample.to_le_bytes());
+        }
+    } else {
+        slice.fill(0);
+    }
+
+    let chunk = data.chunk_mut();
+    *chunk.offset_mut() = 0;
+    *chunk.stride_mut() = SAMPLE_SIZE as _;
+    *chunk.size_mut() = (n_frames * SAMPLE_SIZE) as _;
+}
+
+fn push_sample(queue: &mut VecDeque<f32>, sample: f32) {
+    if queue.len() >= MAX_BUFFERED_SAMPLES {
+        queue.pop_front();
+    }
+    queue.push_back(sample);
 }
 
 fn audio_params(audio_info: spa::param::audio::AudioInfoRaw) -> Result<[&'static Pod; 1]> {
@@ -374,6 +460,11 @@ struct RegisteredCaptureStream<'c> {
 }
 
 struct RegisteredSourceStream<'c> {
+    _stream: pw::stream::StreamBox<'c>,
+    _listener: pw::stream::StreamListener<()>,
+}
+
+struct RegisteredMonitorStream<'c> {
     _stream: pw::stream::StreamBox<'c>,
     _listener: pw::stream::StreamListener<()>,
 }

@@ -2,7 +2,7 @@ use adw::prelude::*;
 
 use crate::ui::window::MainWindow;
 
-const APP_ID: &str = "com.temur.PrivacyVoice";
+const APP_ID: &str = "com.github.xierongchuan.karpender";
 
 pub fn run() {
     adw::init().expect("failed to initialize libadwaita");

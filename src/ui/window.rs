@@ -32,7 +32,7 @@ impl MainWindow {
         toast_overlay.set_child(Some(&root));
 
         let header = adw::HeaderBar::new();
-        header.set_title_widget(Some(&gtk::Label::new(Some("Privacy Voice"))));
+        header.set_title_widget(Some(&gtk::Label::new(Some("Karpender"))));
         root.append(&header);
 
         let content = gtk::Box::new(Orientation::Vertical, 18);
@@ -51,7 +51,7 @@ impl MainWindow {
         input_row.append(&device_dropdown);
         content.append(&input_row);
 
-        let output_label = gtk::Label::new(Some("Output Virtual Mic: Privacy Voice Mic"));
+        let output_label = gtk::Label::new(Some("Output Virtual Mic: Karpender Privacy Voice Mic"));
         output_label.set_halign(gtk::Align::Start);
         content.append(&output_label);
 
@@ -81,6 +81,12 @@ impl MainWindow {
             .build();
         content.append(&labeled_widget("Monotone", &monotone));
 
+        let monitor_output = gtk::Switch::builder()
+            .active(state.borrow().config.monitor_output)
+            .halign(gtk::Align::End)
+            .build();
+        content.append(&labeled_widget("Monitor to Speakers", &monitor_output));
+
         let start_button = gtk::Button::with_label("Start Processing");
         start_button.add_css_class("suggested-action");
         start_button.set_hexpand(true);
@@ -88,7 +94,7 @@ impl MainWindow {
 
         let window = adw::ApplicationWindow::builder()
             .application(app)
-            .title("Privacy Voice")
+            .title("Karpender")
             .default_width(460)
             .default_height(540)
             .content(&toast_overlay)
@@ -102,6 +108,7 @@ impl MainWindow {
             noise_gate,
             robot,
             monotone,
+            monitor_output,
             start_button,
         };
 
@@ -132,6 +139,7 @@ struct UiControls {
     noise_gate: gtk::Scale,
     robot: gtk::Scale,
     monotone: gtk::Switch,
+    monitor_output: gtk::Switch,
     start_button: gtk::Button,
 }
 
@@ -221,6 +229,12 @@ fn connect_control_handlers(
         state_for_monotone.borrow_mut().config.monotone = enabled;
         config::save(&state_for_monotone.borrow().config);
     });
+
+    let state_for_monitor = Rc::clone(state);
+    ui.monitor_output.connect_active_notify(move |switch| {
+        state_for_monitor.borrow_mut().config.monitor_output = switch.is_active();
+        config::save(&state_for_monitor.borrow().config);
+    });
 }
 
 fn connect_start_stop(
@@ -247,7 +261,8 @@ fn connect_start_stop(
         ui_for_button.start_button.set_label("Starting...");
 
         let (sender, receiver) = mpsc::channel::<AudioEvent>();
-        match AudioEngine::start(device_id, Arc::clone(&dsp_params), sender) {
+        let monitor_output = state_for_button.borrow().config.monitor_output;
+        match AudioEngine::start(device_id, Arc::clone(&dsp_params), sender, monitor_output) {
             Ok(engine) => {
                 state_for_button.borrow_mut().engine = Some(engine);
                 ui_for_button.start_button.set_sensitive(true);
