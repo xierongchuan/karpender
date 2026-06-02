@@ -73,7 +73,7 @@ impl MainWindow {
         let robot = gtk::Scale::with_range(Orientation::Horizontal, 0.0, 1.0, 0.01);
         robot.set_value(state.borrow().config.robot_amount as f64);
         robot.set_hexpand(true);
-        content.append(&labeled_widget("Robot Amount", &robot));
+        content.append(&labeled_widget("Privacy Amount", &robot));
 
         let monotone = gtk::Switch::builder()
             .active(state.borrow().config.monotone)

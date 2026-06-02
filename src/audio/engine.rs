@@ -96,7 +96,7 @@ fn run_pipewire(
         &dsp_params,
         &event_sender,
     )?;
-    let source_stream = create_virtual_source_stream(&core, &sample_queue)?;
+    let source_stream = create_virtual_source_stream(&core, &sample_queue, &event_sender)?;
 
     let timer_sender = event_sender.clone();
     let stop_for_timer = Arc::clone(&stop);
@@ -131,23 +131,33 @@ fn create_capture_stream<'c>(
     dsp_params: &Arc<SharedDspParams>,
     event_sender: &Sender<AudioEvent>,
 ) -> Result<RegisteredCaptureStream<'c>> {
-    let stream = pw::stream::StreamBox::new(
-        core,
-        "privacy-voice-capture",
-        properties! {
-            *pw::keys::MEDIA_TYPE => "Audio",
-            *pw::keys::MEDIA_CATEGORY => "Capture",
-            *pw::keys::MEDIA_ROLE => "Communication",
-            *pw::keys::NODE_NAME => "PrivacyVoiceCapture",
-        },
-    )
-    .context("failed to create capture stream")?;
+    let mut stream_props = properties! {
+        *pw::keys::MEDIA_TYPE => "Audio",
+        *pw::keys::MEDIA_CATEGORY => "Capture",
+        *pw::keys::MEDIA_ROLE => "Communication",
+        *pw::keys::NODE_NAME => "PrivacyVoiceCapture",
+        *pw::keys::NODE_DESCRIPTION => "Privacy Voice Capture",
+        "target.object" => input_node_id.to_string(),
+    };
+    stream_props.insert("audio.rate", DEFAULT_SAMPLE_RATE.to_string());
+    stream_props.insert("audio.channels", CHANNELS.to_string());
+    stream_props.insert("audio.format", "F32LE");
+
+    let stream = pw::stream::StreamBox::new(core, "privacy-voice-capture", stream_props)
+        .context("failed to create capture stream")?;
 
     let queue = Arc::clone(sample_queue);
     let params = Arc::clone(dsp_params);
     let events = event_sender.clone();
+    let state_events = event_sender.clone();
     let listener = stream
         .add_local_listener_with_user_data(CaptureData::default())
+        .state_changed(move |_, _, _, new| {
+            if let pw::stream::StreamState::Error(error) = new {
+                let _ =
+                    state_events.send(AudioEvent::Error(format!("capture stream failed: {error}")));
+            }
+        })
         .param_changed(|_, user_data, id, param| {
             if let Some(param) = param {
                 if id == pw::spa::param::ParamType::Format.as_raw() {
@@ -166,18 +176,29 @@ fn create_capture_stream<'c>(
 
             let data = &mut datas[0];
             let n_channels = user_data.format.channels().max(1) as usize;
-            let n_samples = data.chunk().size() as usize / SAMPLE_SIZE;
+            let chunk_offset = data.chunk().offset() as usize;
+            let chunk_bytes = data.chunk().size() as usize;
 
             let Some(samples) = data.data() else {
                 return;
             };
 
+            let frame_bytes = SAMPLE_SIZE * n_channels;
+            if frame_bytes == 0 || chunk_offset >= samples.len() {
+                return;
+            }
+
+            let available_bytes = if chunk_bytes == 0 {
+                samples.len() - chunk_offset
+            } else {
+                chunk_bytes.min(samples.len() - chunk_offset)
+            };
+            let readable = &samples[chunk_offset..chunk_offset + available_bytes];
+
             let processor = &mut user_data.processor;
             let mut peak = 0.0_f32;
             if let Ok(mut queue) = queue.try_lock() {
-                for frame in
-                    samples[..n_samples * SAMPLE_SIZE].chunks_exact(SAMPLE_SIZE * n_channels)
-                {
+                for frame in readable.chunks_exact(frame_bytes) {
                     let mut mono = 0.0_f32;
                     for channel in 0..n_channels {
                         let start = channel * SAMPLE_SIZE;
@@ -210,7 +231,7 @@ fn create_capture_stream<'c>(
     stream
         .connect(
             spa::utils::Direction::Input,
-            Some(input_node_id),
+            None,
             pw::stream::StreamFlags::AUTOCONNECT
                 | pw::stream::StreamFlags::MAP_BUFFERS
                 | pw::stream::StreamFlags::RT_PROCESS,
@@ -227,25 +248,35 @@ fn create_capture_stream<'c>(
 fn create_virtual_source_stream<'c>(
     core: &'c pw::core::Core,
     sample_queue: &Arc<Mutex<VecDeque<f32>>>,
+    event_sender: &Sender<AudioEvent>,
 ) -> Result<RegisteredSourceStream<'c>> {
-    let stream = pw::stream::StreamBox::new(
-        core,
-        "Privacy Voice Mic",
-        properties! {
-            *pw::keys::MEDIA_TYPE => "Audio",
-            *pw::keys::MEDIA_CATEGORY => "Capture",
-            *pw::keys::MEDIA_ROLE => "Communication",
-            *pw::keys::MEDIA_CLASS => "Audio/Source",
-            *pw::keys::NODE_NAME => "PrivacyVoiceMic",
-            *pw::keys::NODE_DESCRIPTION => "Privacy Voice Mic",
-            *pw::keys::NODE_AUTOCONNECT => "false",
-        },
-    )
-    .context("failed to create virtual microphone stream")?;
+    let mut stream_props = properties! {
+        *pw::keys::MEDIA_TYPE => "Audio",
+        *pw::keys::MEDIA_CATEGORY => "Capture",
+        *pw::keys::MEDIA_ROLE => "Communication",
+        *pw::keys::MEDIA_CLASS => "Audio/Source",
+        *pw::keys::NODE_NAME => "PrivacyVoiceMic",
+        *pw::keys::NODE_DESCRIPTION => "Privacy Voice Mic",
+        *pw::keys::NODE_AUTOCONNECT => "false",
+    };
+    stream_props.insert("audio.rate", DEFAULT_SAMPLE_RATE.to_string());
+    stream_props.insert("audio.channels", CHANNELS.to_string());
+    stream_props.insert("audio.format", "F32LE");
+
+    let stream = pw::stream::StreamBox::new(core, "Privacy Voice Mic", stream_props)
+        .context("failed to create virtual microphone stream")?;
 
     let queue = Arc::clone(sample_queue);
+    let state_events = event_sender.clone();
     let listener = stream
         .add_local_listener_with_user_data(())
+        .state_changed(move |_, _, _, new| {
+            if let pw::stream::StreamState::Error(error) = new {
+                let _ = state_events.send(AudioEvent::Error(format!(
+                    "virtual microphone stream failed: {error}"
+                )));
+            }
+        })
         .process(move |stream, _| {
             let Some(mut buffer) = stream.dequeue_buffer() else {
                 return;
