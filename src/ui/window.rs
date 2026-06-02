@@ -1,5 +1,5 @@
 use adw::prelude::*;
-use gtk::{Orientation, glib};
+use gtk::{Orientation, gio, glib};
 use std::{
     cell::RefCell,
     rc::Rc,
@@ -34,6 +34,7 @@ impl MainWindow {
 
         let header = adw::HeaderBar::new();
         header.set_title_widget(Some(&gtk::Label::new(Some("Karpender"))));
+        header.pack_end(&primary_menu_button());
         root.append(&header);
 
         let device_dropdown = gtk::DropDown::from_strings(&["No microphones found"]);
@@ -211,6 +212,17 @@ fn prepare_scale(scale: &gtk::Scale) {
     scale.set_hexpand(true);
     scale.set_width_request(240);
     scale.set_valign(gtk::Align::Center);
+}
+
+fn primary_menu_button() -> gtk::MenuButton {
+    let menu = gio::Menu::new();
+    menu.append(Some("About Karpender"), Some("app.about"));
+
+    gtk::MenuButton::builder()
+        .icon_name("open-menu-symbolic")
+        .menu_model(&menu)
+        .tooltip_text("Main Menu")
+        .build()
 }
 
 fn action_row_with_suffix(title: &str, widget: &impl IsA<gtk::Widget>) -> adw::ActionRow {

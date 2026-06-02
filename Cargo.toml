@@ -2,9 +2,10 @@
 name = "karpender"
 version = "0.1.0"
 edition = "2024"
+license = "LGPL-3.0-or-later"
 
 [dependencies]
-adw = { package = "libadwaita", version = "0.8" }
+adw = { package = "libadwaita", version = "0.8", features = ["v1_5"] }
 anyhow = "1"
 atomic_float = "1"
 gtk = { package = "gtk4", version = "0.10" }

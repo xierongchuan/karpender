@@ -119,4 +119,4 @@ Expected flow while running:
 
 ## Notes
 
-Karpender is an MVP. It aims to make voice recognition harder while keeping speech understandable. It is not a guarantee of anonymity against forensic voice analysis.
+Karpender aims to make voice recognition harder while keeping speech understandable. It is not a guarantee of anonymity against forensic voice analysis.
