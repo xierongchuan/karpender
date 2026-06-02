@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.github.xierongchuan.karpender</id>
+  <name>Karpender</name>
+  <summary>PipeWire voice privacy tool with a virtual microphone</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <url type="homepage">https://github.com/xierongchuan/karpender</url>
+  <description>
+    <p>
+      Karpender reads a physical microphone through PipeWire, applies voice
+      anonymization DSP, exposes a virtual microphone, and can monitor the
+      processed audio to speakers for testing.
+    </p>
+  </description>
+  <launchable type="desktop-id">com.github.xierongchuan.karpender.desktop</launchable>
+  <categories>
+    <category>Audio</category>
+    <category>AudioVideo</category>
+  </categories>
+</component>

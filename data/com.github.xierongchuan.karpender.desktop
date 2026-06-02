@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Karpender
+Comment=PipeWire voice privacy tool with a virtual microphone
+Exec=karpender
+Icon=com.github.xierongchuan.karpender
+Categories=AudioVideo;Audio;GTK;
+Terminal=false
+StartupWMClass=com.github.xierongchuan.karpender
