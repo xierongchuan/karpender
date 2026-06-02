@@ -274,14 +274,14 @@ fn create_monitor_stream<'c>(
         *pw::keys::MEDIA_TYPE => "Audio",
         *pw::keys::MEDIA_CATEGORY => "Playback",
         *pw::keys::MEDIA_ROLE => "Communication",
-        *pw::keys::NODE_NAME => "PrivacyVoiceMonitor",
-        *pw::keys::NODE_DESCRIPTION => "Privacy Voice Monitor",
+        *pw::keys::NODE_NAME => "KarpenderPrivacyVoiceMonitor",
+        *pw::keys::NODE_DESCRIPTION => "Karpender Privacy Voice Monitor",
     };
     stream_props.insert("audio.rate", DEFAULT_SAMPLE_RATE.to_string());
     stream_props.insert("audio.channels", CHANNELS.to_string());
     stream_props.insert("audio.format", "F32LE");
 
-    let stream = pw::stream::StreamBox::new(core, "Privacy Voice Monitor", stream_props)
+    let stream = pw::stream::StreamBox::new(core, "Karpender Privacy Voice Monitor", stream_props)
         .context("failed to create monitor playback stream")?;
 
     let queue = Arc::clone(sample_queue);
@@ -332,15 +332,15 @@ fn create_virtual_source_stream<'c>(
         *pw::keys::MEDIA_CATEGORY => "Capture",
         *pw::keys::MEDIA_ROLE => "Communication",
         *pw::keys::MEDIA_CLASS => "Audio/Source",
-        *pw::keys::NODE_NAME => "PrivacyVoiceMic",
-        *pw::keys::NODE_DESCRIPTION => "Privacy Voice Mic",
+        *pw::keys::NODE_NAME => "KarpenderPrivacyVoiceMic",
+        *pw::keys::NODE_DESCRIPTION => "Karpender Privacy Voice Mic",
         *pw::keys::NODE_AUTOCONNECT => "false",
     };
     stream_props.insert("audio.rate", DEFAULT_SAMPLE_RATE.to_string());
     stream_props.insert("audio.channels", CHANNELS.to_string());
     stream_props.insert("audio.format", "F32LE");
 
-    let stream = pw::stream::StreamBox::new(core, "Privacy Voice Mic", stream_props)
+    let stream = pw::stream::StreamBox::new(core, "Karpender Privacy Voice Mic", stream_props)
         .context("failed to create virtual microphone stream")?;
 
     let queue = Arc::clone(sample_queue);
