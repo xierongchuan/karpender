@@ -1,0 +1,63 @@
+{
+  "app-id": "com.github.xierongchuan.karpender",
+  "branch": "stable",
+  "runtime": "org.gnome.Platform",
+  "runtime-version": "50",
+  "sdk": "org.gnome.Sdk",
+  "sdk-extensions": [
+    "org.freedesktop.Sdk.Extension.rust-stable",
+    "org.freedesktop.Sdk.Extension.llvm21"
+  ],
+  "command": "karpender",
+  "finish-args": [
+    "--share=ipc",
+    "--socket=wayland",
+    "--socket=fallback-x11",
+    "--device=dri",
+    "--socket=pulseaudio",
+    "--filesystem=xdg-run/pipewire-0"
+  ],
+  "cleanup": [
+    "/include",
+    "/lib/pkgconfig",
+    "/share/doc",
+    "/share/gtk-doc",
+    "/share/man",
+    "/share/pkgconfig",
+    "*.a",
+    "*.la"
+  ],
+  "modules": [
+    {
+      "name": "karpender",
+      "buildsystem": "simple",
+      "build-options": {
+        "prepend-path": "/usr/lib/sdk/rust-stable/bin:/usr/lib/sdk/llvm21/bin",
+        "prepend-ld-library-path": "/usr/lib/sdk/llvm21/lib",
+        "env": {
+          "CARGO_HOME": "/run/build/karpender/cargo",
+          "LIBCLANG_PATH": "/usr/lib/sdk/llvm21/lib"
+        }
+      },
+      "build-commands": [
+        "cargo build --release --locked --offline",
+        "install -Dm755 target/release/karpender ${FLATPAK_DEST}/bin/karpender",
+        "install -Dm644 data/com.github.xierongchuan.karpender.desktop ${FLATPAK_DEST}/share/applications/com.github.xierongchuan.karpender.desktop",
+        "install -Dm644 data/com.github.xierongchuan.karpender.metainfo.xml ${FLATPAK_DEST}/share/metainfo/com.github.xierongchuan.karpender.metainfo.xml",
+        "install -Dm644 data/icons/com.github.xierongchuan.karpender.svg ${FLATPAK_DEST}/share/icons/hicolor/scalable/apps/com.github.xierongchuan.karpender.svg"
+      ],
+      "sources": [
+        "cargo-sources.json",
+        {
+          "type": "dir",
+          "path": "../..",
+          "skip": [
+            ".git",
+            "dist",
+            "target"
+          ]
+        }
+      ]
+    }
+  ]
+}

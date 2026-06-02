@@ -17,3 +17,9 @@ spa = { package = "libspa", version = "0.10", features = ["v1_6_0"] }
 [patch.crates-io]
 libspa = { path = "vendor/libspa-0.10.0" }
 pipewire = { path = "vendor/pipewire-0.10.0" }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true

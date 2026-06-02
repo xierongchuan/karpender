@@ -5,12 +5,29 @@
   <summary>PipeWire voice privacy tool with a virtual microphone</summary>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>LGPL-3.0-or-later</project_license>
+  <developer id="com.github.xierongchuan">
+    <name>xierongchuan</name>
+  </developer>
   <url type="homepage">https://github.com/xierongchuan/karpender</url>
+  <url type="bugtracker">https://github.com/xierongchuan/karpender/issues</url>
+  <url type="vcs-browser">https://github.com/xierongchuan/karpender</url>
   <description>
     <p>
-      Karpender reads a physical microphone through PipeWire, applies voice
-      anonymization DSP, exposes a virtual microphone, and can monitor the
-      processed audio to speakers for testing.
+      Karpender is a desktop voice privacy tool for PipeWire-based Linux
+      systems. It reads audio from a selected physical microphone, applies
+      voice anonymization processing, and exposes the processed signal as a
+      virtual microphone for calls, chats, browsers, OBS, and other recording
+      applications.
+    </p>
+    <p>
+      The app is designed to keep speech understandable while making the voice
+      harder to recognize. Controls include privacy strength, soft noise
+      cleanup, intonation flattening, voice profiles, gain adjustment, and an
+      optional local monitor output for testing with headphones.
+    </p>
+    <p>
+      Karpender creates the virtual microphone through PipeWire, so other apps
+      can select it as a normal input source without extra plugins.
     </p>
   </description>
   <launchable type="desktop-id">com.github.xierongchuan.karpender.desktop</launchable>
@@ -18,4 +35,25 @@
     <category>Audio</category>
     <category>AudioVideo</category>
   </categories>
+  <keywords>
+    <keyword>audio</keyword>
+    <keyword>microphone</keyword>
+    <keyword>pipewire</keyword>
+    <keyword>privacy</keyword>
+    <keyword>voice</keyword>
+  </keywords>
+  <screenshots>
+    <screenshot type="default">
+      <caption>Main window with microphone selection and voice privacy controls</caption>
+      <image width="1600" height="900">https://raw.githubusercontent.com/xierongchuan/karpender/master/data/screenshots/main-window.png</image>
+    </screenshot>
+  </screenshots>
+  <content_rating type="oars-1.1" />
+  <releases>
+    <release version="0.1.0" date="2026-06-03">
+      <description>
+        <p>Initial release with PipeWire microphone capture, voice anonymization DSP, virtual microphone output, and optional monitoring.</p>
+      </description>
+    </release>
+  </releases>
 </component>

@@ -89,6 +89,42 @@ target/appimage/Karpender.AppDir
 
 Then put `appimagetool` in `PATH` or at `target/appimage-tools/appimagetool-<arch>.AppImage` and rerun the script.
 
+## Flatpak Build
+
+The Flatpak setup lives in:
+
+- `scripts/build-flatpak.sh`
+- `scripts/generate-flatpak-cargo-sources.py`
+- `packaging/flatpak/com.github.xierongchuan.karpender.json`
+- `packaging/flatpak/cargo-sources.json`
+
+Required tooling:
+
+- `flatpak`
+- `flatpak-builder`
+- Flathub configured for the user Flatpak installation. `scripts/build-flatpak.sh` adds the user remote automatically if it is missing.
+
+Build a local bundle:
+
+```bash
+scripts/build-flatpak.sh
+```
+
+The script regenerates `packaging/flatpak/cargo-sources.json` from `Cargo.lock`, builds against `org.gnome.Platform//50` and the Rust/LLVM SDK extensions, writes a local OSTree repository under `target/flatpak`, and exports:
+
+```text
+dist/Karpender-<version>.flatpak
+```
+
+Install the exported bundle locally:
+
+```bash
+flatpak install --user dist/Karpender-<version>.flatpak
+flatpak run com.github.xierongchuan.karpender
+```
+
+The manifest grants Wayland/X11 fallback, GPU, PulseAudio, and PipeWire socket access so Karpender can show the GTK UI, read microphone nodes, create the virtual microphone, and monitor processed audio.
+
 ## Development Checks
 
 ```bash
