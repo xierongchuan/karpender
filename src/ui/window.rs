@@ -36,83 +36,120 @@ impl MainWindow {
         header.set_title_widget(Some(&gtk::Label::new(Some("Karpender"))));
         root.append(&header);
 
-        let content = gtk::Box::new(Orientation::Vertical, 18);
-        content.set_margin_top(24);
-        content.set_margin_bottom(24);
-        content.set_margin_start(24);
-        content.set_margin_end(24);
-        root.append(&content);
-
-        let input_row = gtk::Box::new(Orientation::Vertical, 8);
-        let input_label = gtk::Label::new(Some("Input Device"));
-        input_label.set_halign(gtk::Align::Start);
         let device_dropdown = gtk::DropDown::from_strings(&["No microphones found"]);
-        device_dropdown.set_hexpand(true);
-        input_row.append(&input_label);
-        input_row.append(&device_dropdown);
-        content.append(&input_row);
-
-        let output_label = gtk::Label::new(Some("Output Virtual Mic: Karpender Privacy Voice Mic"));
-        output_label.set_halign(gtk::Align::Start);
-        content.append(&output_label);
+        device_dropdown.set_width_request(220);
+        device_dropdown.set_valign(gtk::Align::Center);
 
         let profile_row = gtk::Box::new(Orientation::Horizontal, 8);
         let profile_dropdown = gtk::DropDown::from_strings(&["Manual Settings"]);
-        profile_dropdown.set_hexpand(true);
-        let add_profile_button = gtk::Button::with_label("Add");
-        let delete_profile_button = gtk::Button::with_label("Delete");
+        profile_dropdown.set_width_request(190);
+        profile_dropdown.set_valign(gtk::Align::Center);
+        let profile_actions = gtk::Box::new(Orientation::Horizontal, 0);
+        profile_actions.add_css_class("linked");
+        profile_actions.set_valign(gtk::Align::Center);
+        let add_profile_button = gtk::Button::from_icon_name("list-add-symbolic");
+        add_profile_button.set_tooltip_text(Some("Add Profile"));
+        let delete_profile_button = gtk::Button::from_icon_name("user-trash-symbolic");
+        delete_profile_button.set_tooltip_text(Some("Delete Profile"));
         profile_row.append(&profile_dropdown);
-        profile_row.append(&add_profile_button);
-        profile_row.append(&delete_profile_button);
-        content.append(&labeled_widget("Profile", &profile_row));
+        profile_actions.append(&add_profile_button);
+        profile_actions.append(&delete_profile_button);
+        profile_row.append(&profile_actions);
 
         let voice_mode = gtk::DropDown::from_strings(&voice_mode_labels());
         voice_mode.set_selected(voice_mode_index(state.borrow().config.voice_mode) as u32);
-        voice_mode.set_hexpand(true);
-        content.append(&labeled_widget("Processing Type", &voice_mode));
+        voice_mode.set_width_request(220);
+        voice_mode.set_valign(gtk::Align::Center);
 
         let level = gtk::LevelBar::for_interval(0.0, 1.0);
         level.set_value(0.0);
-        level.set_hexpand(true);
-        content.append(&labeled_widget("Level", &level));
+        level.set_width_request(220);
+        level.set_valign(gtk::Align::Center);
 
         let gain = gtk::Scale::with_range(Orientation::Horizontal, 0.0, 4.0, 0.05);
         gain.set_value(state.borrow().config.gain as f64);
-        gain.set_hexpand(true);
-        content.append(&labeled_widget("Gain", &gain));
+        prepare_scale(&gain);
 
         let noise_gate = gtk::Scale::with_range(Orientation::Horizontal, 0.0, 0.4, 0.005);
         noise_gate.set_value(state.borrow().config.noise_gate as f64);
-        noise_gate.set_hexpand(true);
-        content.append(&labeled_widget("Noise Cleanup", &noise_gate));
+        prepare_scale(&noise_gate);
 
         let robot = gtk::Scale::with_range(Orientation::Horizontal, 0.0, 1.0, 0.01);
         robot.set_value(state.borrow().config.robot_amount as f64);
-        robot.set_hexpand(true);
-        content.append(&labeled_widget("Privacy Amount", &robot));
+        prepare_scale(&robot);
 
         let monotone = gtk::Switch::builder()
             .active(state.borrow().config.monotone)
-            .halign(gtk::Align::End)
+            .valign(gtk::Align::Center)
             .build();
-        content.append(&labeled_widget("Flatten Intonation", &monotone));
 
         let monitor_output = gtk::Switch::builder()
             .active(state.borrow().config.monitor_output)
-            .halign(gtk::Align::End)
+            .valign(gtk::Align::Center)
             .build();
-        content.append(&labeled_widget("Monitor to Speakers", &monitor_output));
 
         let start_button = gtk::Button::with_label("Start Processing");
         start_button.add_css_class("suggested-action");
         start_button.set_hexpand(true);
-        content.append(&start_button);
+        start_button.set_margin_top(6);
+
+        let page = adw::PreferencesPage::new();
+        page.set_vexpand(true);
+
+        let devices_group = adw::PreferencesGroup::builder()
+            .title("Audio")
+            .description("Select the source microphone and virtual output.")
+            .build();
+        devices_group.add(&action_row_with_suffix("Input Device", &device_dropdown));
+        let output_row = adw::ActionRow::builder()
+            .title("Virtual Microphone")
+            .subtitle("Karpender Privacy Voice Mic")
+            .selectable(false)
+            .build();
+        devices_group.add(&output_row);
+        devices_group.add(&action_row_with_suffix("Level", &level));
+        page.add(&devices_group);
+
+        let profiles_group = adw::PreferencesGroup::builder()
+            .title("Profiles")
+            .description("Choose a built-in voice or save the current controls.")
+            .build();
+        profiles_group.add(&action_row_with_suffix("Profile", &profile_row));
+        profiles_group.add(&action_row_with_suffix("Processing Type", &voice_mode));
+        page.add(&profiles_group);
+
+        let controls_group = adw::PreferencesGroup::builder()
+            .title("Voice Controls")
+            .description("Fine tune drive, cleanup, and anonymization strength.")
+            .build();
+        controls_group.add(&action_row_with_suffix("Gain", &gain));
+        controls_group.add(&action_row_with_suffix("Noise Cleanup", &noise_gate));
+        controls_group.add(&action_row_with_suffix("Privacy Amount", &robot));
+        controls_group.add(&switch_action_row("Flatten Intonation", &monotone));
+        controls_group.add(&switch_action_row("Monitor to Speakers", &monitor_output));
+        page.add(&controls_group);
+
+        let session_group = adw::PreferencesGroup::new();
+        session_group.add(&start_button);
+        page.add(&session_group);
+
+        let clamp = adw::Clamp::builder()
+            .maximum_size(560)
+            .tightening_threshold(360)
+            .child(&page)
+            .build();
+        let scrolled = gtk::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .child(&clamp)
+            .vexpand(true)
+            .build();
+        root.append(&scrolled);
 
         let window = adw::ApplicationWindow::builder()
             .application(app)
             .title("Karpender")
-            .default_width(460)
-            .default_height(620)
+            .default_width(520)
+            .default_height(680)
             .content(&toast_overlay)
             .build();
 
@@ -169,12 +206,32 @@ struct UiControls {
     start_button: gtk::Button,
 }
 
-fn labeled_widget(label: &str, widget: &impl IsA<gtk::Widget>) -> gtk::Box {
-    let row = gtk::Box::new(Orientation::Vertical, 6);
-    let label = gtk::Label::new(Some(label));
-    label.set_halign(gtk::Align::Start);
-    row.append(&label);
-    row.append(widget);
+fn prepare_scale(scale: &gtk::Scale) {
+    scale.set_draw_value(false);
+    scale.set_hexpand(true);
+    scale.set_width_request(240);
+    scale.set_valign(gtk::Align::Center);
+}
+
+fn action_row_with_suffix(title: &str, widget: &impl IsA<gtk::Widget>) -> adw::ActionRow {
+    let row = adw::ActionRow::builder()
+        .title(title)
+        .selectable(false)
+        .activatable(false)
+        .build();
+    widget.set_valign(gtk::Align::Center);
+    row.add_suffix(widget);
+    row
+}
+
+fn switch_action_row(title: &str, switch: &gtk::Switch) -> adw::ActionRow {
+    let row = adw::ActionRow::builder()
+        .title(title)
+        .selectable(false)
+        .activatable_widget(switch)
+        .build();
+    switch.set_valign(gtk::Align::Center);
+    row.add_suffix(switch);
     row
 }
 
