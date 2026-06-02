@@ -1,8 +1,90 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
-  <rect width="128" height="128" rx="24" fill="#20242b"/>
-  <path d="M64 22c-10 0-18 8-18 18v26c0 10 8 18 18 18s18-8 18-18V40c0-10-8-18-18-18z" fill="#f2f4f8"/>
-  <path d="M36 60v6c0 15 12 28 28 28s28-13 28-28v-6" fill="none" stroke="#7dd3fc" stroke-width="8" stroke-linecap="round"/>
-  <path d="M64 94v18M48 112h32" fill="none" stroke="#7dd3fc" stroke-width="8" stroke-linecap="round"/>
-  <path d="M52 48h24M52 62h24" stroke="#20242b" stroke-width="6" stroke-linecap="round"/>
-  <path d="M91 30l13-8M94 45h16M91 60l13 8" stroke="#fbbf24" stroke-width="6" stroke-linecap="round"/>
+  <defs>
+    <clipPath id="icon-clip">
+      <path d="M64 4C35.6 4 25.8 6.8 16.4 16.4C6.8 25.8 4 35.6 4 64C4 92.4 6.8 102.2 16.4 111.6C25.8 121.2 35.6 124 64 124C92.4 124 102.2 121.2 111.6 111.6C121.2 102.2 124 92.4 124 64C124 35.6 121.2 25.8 111.6 16.4C102.2 6.8 92.4 4 64 4Z"/>
+    </clipPath>
+    <linearGradient id="surface" x1="22" y1="5" x2="105" y2="124" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#65d8eb"/>
+      <stop offset="0.34" stop-color="#3d73e2"/>
+      <stop offset="0.72" stop-color="#24328f"/>
+      <stop offset="1" stop-color="#17145c"/>
+    </linearGradient>
+    <linearGradient id="top-bevel" x1="64" y1="4" x2="64" y2="62" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.34"/>
+      <stop offset="0.42" stop-color="#ffffff" stop-opacity="0.11"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="bottom-bevel" x1="64" y1="62" x2="64" y2="124" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#020c30" stop-opacity="0"/>
+      <stop offset="0.7" stop-color="#020c30" stop-opacity="0.24"/>
+      <stop offset="1" stop-color="#020c30" stop-opacity="0.42"/>
+    </linearGradient>
+    <linearGradient id="left-edge" x1="4" y1="64" x2="33" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="right-edge" x1="99" y1="64" x2="124" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#020c30" stop-opacity="0"/>
+      <stop offset="1" stop-color="#020c30" stop-opacity="0.32"/>
+    </linearGradient>
+    <linearGradient id="outer-line" x1="64" y1="4" x2="64" y2="124" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.52"/>
+      <stop offset="0.44" stop-color="#ffffff" stop-opacity="0.18"/>
+      <stop offset="0.72" stop-color="#071044" stop-opacity="0.2"/>
+      <stop offset="1" stop-color="#02061d" stop-opacity="0.58"/>
+    </linearGradient>
+    <linearGradient id="inner-line" x1="64" y1="8" x2="64" y2="120" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.28"/>
+      <stop offset="0.48" stop-color="#ffffff" stop-opacity="0.04"/>
+      <stop offset="1" stop-color="#050b2c" stop-opacity="0.5"/>
+    </linearGradient>
+    <linearGradient id="mic-shell" x1="50" y1="21" x2="81" y2="89" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.46" stop-color="#f3f8ff"/>
+      <stop offset="1" stop-color="#bfd6ff"/>
+    </linearGradient>
+    <linearGradient id="mic-frame" x1="64" y1="59" x2="64" y2="114" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#c8dcff"/>
+    </linearGradient>
+    <linearGradient id="mic-rim" x1="64" y1="23" x2="64" y2="88" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.74"/>
+      <stop offset="1" stop-color="#2a3f9b" stop-opacity="0.26"/>
+    </linearGradient>
+    <linearGradient id="shield-fill" x1="69" y1="54" x2="101" y2="104" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#9dffe6"/>
+      <stop offset="0.58" stop-color="#22d2bd"/>
+      <stop offset="1" stop-color="#07908a"/>
+    </linearGradient>
+    <linearGradient id="shield-depth" x1="82" y1="70" x2="91" y2="108" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="1" stop-color="#004a58" stop-opacity="0.34"/>
+    </linearGradient>
+  </defs>
+
+  <g clip-path="url(#icon-clip)">
+    <rect width="128" height="128" fill="url(#surface)"/>
+    <rect width="128" height="64" fill="url(#top-bevel)"/>
+    <rect y="61" width="128" height="67" fill="url(#bottom-bevel)"/>
+    <rect width="34" height="128" fill="url(#left-edge)"/>
+    <rect x="96" width="32" height="128" fill="url(#right-edge)"/>
+    <path d="M14 41C25 24 43 16 66 17C89 18 105 29 116 51C104 39 87 33 65 33C44 33 27 36 14 41Z" fill="#ffffff" opacity="0.12"/>
+    <path d="M9 90C23 97 42 100 64 100C87 100 106 96 121 88V128H9Z" fill="#070d39" opacity="0.16"/>
+  </g>
+
+  <g clip-path="url(#icon-clip)">
+    <path d="M64 4C35.6 4 25.8 6.8 16.4 16.4C6.8 25.8 4 35.6 4 64C4 92.4 6.8 102.2 16.4 111.6C25.8 121.2 35.6 124 64 124C92.4 124 102.2 121.2 111.6 111.6C121.2 102.2 124 92.4 124 64C124 35.6 121.2 25.8 111.6 16.4C102.2 6.8 92.4 4 64 4Z" fill="none" stroke="url(#outer-line)" stroke-width="2.2"/>
+    <path d="M64 8C38.1 8 29.2 10.6 20.6 20.6C10.6 29.2 8 38.1 8 64C8 89.9 10.6 98.8 20.6 107.4C29.2 117.4 38.1 120 64 120C89.9 120 98.8 117.4 107.4 107.4C117.4 98.8 120 89.9 120 64C120 38.1 117.4 29.2 107.4 20.6C98.8 10.6 89.9 8 64 8Z" fill="none" stroke="url(#inner-line)" stroke-width="1"/>
+  </g>
+
+  <path d="M64 23C52.2 23 43.5 31.8 43.5 43.9V67.6C43.5 79.7 52.2 88.5 64 88.5C75.8 88.5 84.5 79.7 84.5 67.6V43.9C84.5 31.8 75.8 23 64 23Z" fill="url(#mic-shell)" stroke="url(#mic-rim)" stroke-width="1.4"/>
+  <path d="M64 28C73 28 79.5 34.7 79.5 44.1V49.5H48.5V44.1C48.5 34.7 55 28 64 28Z" fill="#ffffff" opacity="0.42"/>
+  <path d="M53.5 46H74.5M53.5 59.5H74.5" fill="none" stroke="#2c5ec6" stroke-width="5.5" stroke-linecap="round" opacity="0.78"/>
+  <path d="M36.5 62V67.4C36.5 83.8 49.1 96.8 64 96.8C78.9 96.8 91.5 83.8 91.5 67.4V62" fill="none" stroke="url(#mic-frame)" stroke-width="8" stroke-linecap="round"/>
+  <path d="M64 96.5V111M50.5 111H77.5" fill="none" stroke="url(#mic-frame)" stroke-width="8" stroke-linecap="round"/>
+
+  <path d="M83 53.5L104 61.4V75.9C104 91.2 95 100.6 83 105.8C71 100.6 62 91.2 62 75.9V61.4Z" fill="url(#shield-fill)" stroke="#d6fff5" stroke-opacity="0.78" stroke-width="1.3"/>
+  <path d="M62 75.9C62 91.2 71 100.6 83 105.8C92.3 101.8 99.8 94.9 102.8 84.1C95.8 89.2 86.8 92.3 76.3 92.3C71.1 92.3 66.3 91.5 62 89.9Z" fill="url(#shield-depth)"/>
+  <path d="M69 64.8L83 59.5L97 64.8V73.7C97 84.3 91.7 92.1 83 96.8C74.3 92.1 69 84.3 69 73.7Z" fill="#ffffff" opacity="0.16"/>
+  <path d="M73 77L80.1 84.1L94.5 66.8" fill="none" stroke="#f8fffb" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
