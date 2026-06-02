@@ -55,13 +55,11 @@ cp "$ROOT_DIR/target/release/karpender" "$APPDIR/usr/bin/karpender"
 cp "$ROOT_DIR/packaging/appimage/AppRun" "$APPDIR/AppRun"
 cp "$ROOT_DIR/data/$APP_ID.desktop" "$APPDIR/usr/share/applications/$APP_ID.desktop"
 cp "$ROOT_DIR/data/$APP_ID.metainfo.xml" "$APPDIR/usr/share/metainfo/$APP_ID.metainfo.xml"
-cp "$ROOT_DIR/data/$APP_ID.metainfo.xml" "$APPDIR/usr/share/metainfo/$APP_ID.appdata.xml"
 cp "$ROOT_DIR/data/icons/$APP_ID.svg" "$APPDIR/usr/share/icons/hicolor/scalable/apps/$APP_ID.svg"
 chmod 755 "$APPDIR/usr/bin/karpender" "$APPDIR/AppRun"
 chmod 644 \
   "$APPDIR/usr/share/applications/$APP_ID.desktop" \
   "$APPDIR/usr/share/metainfo/$APP_ID.metainfo.xml" \
-  "$APPDIR/usr/share/metainfo/$APP_ID.appdata.xml" \
   "$APPDIR/usr/share/icons/hicolor/scalable/apps/$APP_ID.svg"
 
 cp "$APPDIR/usr/share/applications/$APP_ID.desktop" "$APPDIR/$APP_ID.desktop"
