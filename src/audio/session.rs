@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use atomic_float::AtomicF32;
 use pipewire as pw;
 use std::{
     sync::{
@@ -23,6 +24,7 @@ pub(super) fn run_pipewire(
     dsp_params: Arc<SharedDspParams>,
     event_sender: Sender<AudioEvent>,
     stop: Arc<AtomicBool>,
+    level: Arc<AtomicF32>,
     monitor_output: bool,
 ) -> Result<()> {
     pw::init();
@@ -45,6 +47,7 @@ pub(super) fn run_pipewire(
         monitor_queue.as_ref(),
         &dsp_params,
         &event_sender,
+        &level,
     )?;
     let source_stream = create_virtual_source_stream(&core, &virtual_queue, &event_sender)?;
     let monitor_stream = if let Some(queue) = &monitor_queue {

@@ -4,7 +4,8 @@ use std::{rc::Rc, sync::Arc};
 use crate::{config::VoiceMode, dsp::SharedDspParams, ui::layout::UiControls};
 
 use super::{
-    profile_controls::select_manual_profile, settings::save_config, state::SharedWindowState,
+    profile_controls::select_manual_profile, settings::save_config_debounced,
+    state::SharedWindowState,
 };
 
 pub(super) fn connect_processing_handlers(
@@ -24,7 +25,7 @@ pub(super) fn connect_processing_handlers(
         params_for_voice_mode.set_voice_mode(mode);
         state_for_voice_mode.borrow_mut().config.voice_mode = mode;
         state_for_voice_mode.borrow_mut().config.active_profile_id = None;
-        save_config(&state_for_voice_mode.borrow().config, &ui_for_voice_mode);
+        save_config_debounced(&state_for_voice_mode.borrow().config, &ui_for_voice_mode);
         select_manual_profile(&state_for_voice_mode, &ui_for_voice_mode);
     });
 
@@ -40,7 +41,7 @@ pub(super) fn connect_processing_handlers(
         params_for_gain.set_gain(value);
         state_for_gain.borrow_mut().config.gain = value;
         state_for_gain.borrow_mut().config.active_profile_id = None;
-        save_config(&state_for_gain.borrow().config, &ui_for_gain);
+        save_config_debounced(&state_for_gain.borrow().config, &ui_for_gain);
         select_manual_profile(&state_for_gain, &ui_for_gain);
     });
 
@@ -56,7 +57,7 @@ pub(super) fn connect_processing_handlers(
         params_for_gate.set_noise_gate(value);
         state_for_gate.borrow_mut().config.noise_gate = value;
         state_for_gate.borrow_mut().config.active_profile_id = None;
-        save_config(&state_for_gate.borrow().config, &ui_for_gate);
+        save_config_debounced(&state_for_gate.borrow().config, &ui_for_gate);
         select_manual_profile(&state_for_gate, &ui_for_gate);
     });
 
@@ -72,7 +73,7 @@ pub(super) fn connect_processing_handlers(
         params_for_robot.set_robot_amount(value);
         state_for_robot.borrow_mut().config.robot_amount = value;
         state_for_robot.borrow_mut().config.active_profile_id = None;
-        save_config(&state_for_robot.borrow().config, &ui_for_robot);
+        save_config_debounced(&state_for_robot.borrow().config, &ui_for_robot);
         select_manual_profile(&state_for_robot, &ui_for_robot);
     });
 
@@ -88,7 +89,7 @@ pub(super) fn connect_processing_handlers(
         params_for_monotone.set_monotone(enabled);
         state_for_monotone.borrow_mut().config.monotone = enabled;
         state_for_monotone.borrow_mut().config.active_profile_id = None;
-        save_config(&state_for_monotone.borrow().config, &ui_for_monotone);
+        save_config_debounced(&state_for_monotone.borrow().config, &ui_for_monotone);
         select_manual_profile(&state_for_monotone, &ui_for_monotone);
     });
 
@@ -96,6 +97,6 @@ pub(super) fn connect_processing_handlers(
     let ui_for_monitor = ui.clone();
     ui.monitor_output.connect_active_notify(move |switch| {
         state_for_monitor.borrow_mut().config.monitor_output = switch.is_active();
-        save_config(&state_for_monitor.borrow().config, &ui_for_monitor);
+        save_config_debounced(&state_for_monitor.borrow().config, &ui_for_monitor);
     });
 }

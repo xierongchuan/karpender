@@ -18,9 +18,10 @@ pub(super) fn audio_info() -> spa::param::audio::AudioInfoRaw {
     audio_info
 }
 
-pub(super) fn audio_params(
+pub(super) fn with_audio_params<T>(
     audio_info: spa::param::audio::AudioInfoRaw,
-) -> Result<[&'static Pod; 1]> {
+    connect: impl FnOnce(&mut [&Pod; 1]) -> Result<T>,
+) -> Result<T> {
     let obj = pw::spa::pod::Object {
         type_: pw::spa::utils::SpaTypes::ObjectParamFormat.as_raw(),
         id: pw::spa::param::ParamType::EnumFormat.as_raw(),
@@ -34,10 +35,11 @@ pub(super) fn audio_params(
     .0
     .into_inner();
 
-    let pod = Pod::from_bytes(Box::leak(values.into_boxed_slice()))
+    let pod = Pod::from_bytes(&values)
         .ok_or_else(|| anyhow::anyhow!("failed to build PipeWire audio format pod"))?;
+    let mut params = [pod];
 
-    Ok([pod])
+    connect(&mut params)
 }
 
 pub(super) fn f32_from_le_slice(bytes: &[u8]) -> f32 {

@@ -1,8 +1,15 @@
 use adw::prelude::*;
+use atomic_float::AtomicF32;
 use gtk::glib;
 use std::{
     rc::Rc,
-    sync::{Arc, mpsc, mpsc::Receiver},
+    sync::{
+        Arc,
+        atomic::Ordering,
+        mpsc::{self, Receiver, TryRecvError},
+    },
+    thread,
+    time::Duration,
 };
 
 use crate::{
@@ -40,7 +47,13 @@ pub(super) fn connect_start_stop(
         let monitor_output = state_for_button.borrow().config.monitor_output;
         match AudioEngine::start(device_id, Arc::clone(&dsp_params), sender, monitor_output) {
             Ok(engine) => {
-                state_for_button.borrow_mut().engine = Some(engine);
+                let level = engine.level_meter();
+                let session_id = {
+                    let mut state = state_for_button.borrow_mut();
+                    state.session_id = state.session_id.wrapping_add(1);
+                    state.engine = Some(engine);
+                    state.session_id
+                };
                 ui_for_button.start_button.set_sensitive(true);
                 ui_for_button.start_button.set_label("Stop Processing");
                 ui_for_button
@@ -49,7 +62,13 @@ pub(super) fn connect_start_stop(
                 ui_for_button
                     .start_button
                     .add_css_class("destructive-action");
-                attach_audio_events(receiver, &state_for_button, &ui_for_button);
+                attach_audio_events(
+                    receiver,
+                    level,
+                    session_id,
+                    &state_for_button,
+                    &ui_for_button,
+                );
             }
             Err(error) => {
                 ui_for_button.start_button.set_sensitive(true);
@@ -62,29 +81,46 @@ pub(super) fn connect_start_stop(
     });
 }
 
-fn attach_audio_events(receiver: Receiver<AudioEvent>, state: &SharedWindowState, ui: &UiControls) {
+fn attach_audio_events(
+    receiver: Receiver<AudioEvent>,
+    level: Arc<AtomicF32>,
+    session_id: u64,
+    state: &SharedWindowState,
+    ui: &UiControls,
+) {
     let state = Rc::clone(state);
     let ui = ui.clone();
     glib::timeout_add_local(std::time::Duration::from_millis(33), move || {
-        while let Ok(event) = receiver.try_recv() {
-            match event {
-                AudioEvent::Level(value) => ui.level.set_value(value as f64),
-                AudioEvent::Started => {}
-                AudioEvent::Stopped => {
+        if state.borrow().session_id != session_id {
+            return glib::ControlFlow::Break;
+        }
+
+        ui.level.set_value(level.load(Ordering::Relaxed) as f64);
+        loop {
+            match receiver.try_recv() {
+                Ok(AudioEvent::Started) => {}
+                Ok(AudioEvent::Stopped) => {
                     state.borrow_mut().engine = None;
                     set_stopped_ui(&ui);
                     return glib::ControlFlow::Break;
                 }
-                AudioEvent::Error(error) => {
-                    state.borrow_mut().engine = None;
+                Ok(AudioEvent::Error(error)) => {
+                    if let Some(engine) = state.borrow_mut().engine.take() {
+                        stop_engine_in_background(engine);
+                    }
                     set_stopped_ui(&ui);
                     ui.toast_overlay
                         .add_toast(adw::Toast::new(&format!("Audio error: {error}")));
                     return glib::ControlFlow::Break;
                 }
-            }
+                Err(TryRecvError::Empty) => return glib::ControlFlow::Continue,
+                Err(TryRecvError::Disconnected) => {
+                    state.borrow_mut().engine = None;
+                    set_stopped_ui(&ui);
+                    return glib::ControlFlow::Break;
+                }
+            };
         }
-        glib::ControlFlow::Continue
     });
 }
 
@@ -92,11 +128,33 @@ fn stop_engine(state: &SharedWindowState, ui: &UiControls) {
     ui.start_button.set_sensitive(false);
     ui.start_button.set_label("Stopping...");
 
-    if let Some(mut engine) = state.borrow_mut().engine.take() {
-        engine.stop();
-    }
+    let (mut engine, session_id) = {
+        let mut state = state.borrow_mut();
+        state.session_id = state.session_id.wrapping_add(1);
+        (state.engine.take(), state.session_id)
+    };
 
-    set_stopped_ui(ui);
+    if let Some(mut engine) = engine.take() {
+        let (sender, receiver) = mpsc::channel();
+        thread::spawn(move || {
+            engine.stop();
+            let _ = sender.send(());
+        });
+
+        let ui = ui.clone();
+        let state = Rc::clone(state);
+        glib::timeout_add_local(Duration::from_millis(50), move || {
+            match receiver.try_recv() {
+                Ok(()) | Err(TryRecvError::Disconnected) => {
+                    if state.borrow().session_id == session_id {
+                        set_stopped_ui(&ui);
+                    }
+                    glib::ControlFlow::Break
+                }
+                Err(TryRecvError::Empty) => glib::ControlFlow::Continue,
+            }
+        });
+    }
 }
 
 fn set_stopped_ui(ui: &UiControls) {
@@ -105,6 +163,10 @@ fn set_stopped_ui(ui: &UiControls) {
     ui.start_button.remove_css_class("destructive-action");
     ui.start_button.add_css_class("suggested-action");
     ui.level.set_value(0.0);
+}
+
+fn stop_engine_in_background(mut engine: AudioEngine) {
+    thread::spawn(move || engine.stop());
 }
 
 fn selected_device_id(state: &SharedWindowState, ui: &UiControls) -> Option<u32> {

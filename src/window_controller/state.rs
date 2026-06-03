@@ -11,6 +11,7 @@ pub(crate) struct WindowState {
     pub devices: Vec<AudioDevice>,
     pub config: AppConfig,
     pub engine: Option<AudioEngine>,
+    pub session_id: u64,
     pub updating_controls: bool,
 }
 
@@ -20,6 +21,7 @@ impl WindowState {
             devices: Vec::new(),
             config,
             engine: None,
+            session_id: 0,
             updating_controls: false,
         }))
     }

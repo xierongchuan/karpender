@@ -1,14 +1,15 @@
 use anyhow::{Context, Result};
+use atomic_float::AtomicF32;
 use pipewire as pw;
 use pw::{properties::properties, spa};
-use std::sync::{Arc, mpsc::Sender};
+use std::sync::{Arc, atomic::Ordering, mpsc::Sender};
 
 use crate::dsp::{SharedDspParams, VoiceProcessor};
 
 use super::insert_audio_props;
 use crate::audio::{
     engine::AudioEvent,
-    format::{SAMPLE_SIZE, audio_info, audio_params, f32_from_le_slice},
+    format::{SAMPLE_SIZE, audio_info, f32_from_le_slice, with_audio_params},
     sample_queue::SampleQueue,
 };
 
@@ -19,6 +20,7 @@ pub(in crate::audio) fn create_capture_stream<'c>(
     monitor_queue: Option<&Arc<SampleQueue>>,
     dsp_params: &Arc<SharedDspParams>,
     event_sender: &Sender<AudioEvent>,
+    level: &Arc<AtomicF32>,
 ) -> Result<RegisteredCaptureStream<'c>> {
     let mut stream_props = properties! {
         *pw::keys::MEDIA_TYPE => "Audio",
@@ -36,7 +38,7 @@ pub(in crate::audio) fn create_capture_stream<'c>(
     let virtual_queue = Arc::clone(virtual_queue);
     let monitor_queue = monitor_queue.map(Arc::clone);
     let params = Arc::clone(dsp_params);
-    let events = event_sender.clone();
+    let level = Arc::clone(level);
     let state_events = event_sender.clone();
     let listener = stream
         .add_local_listener_with_user_data(CaptureData::default())
@@ -60,24 +62,24 @@ pub(in crate::audio) fn create_capture_stream<'c>(
                 &params,
                 &virtual_queue,
                 monitor_queue.as_ref(),
-                &events,
+                &level,
             );
         })
         .register()
         .context("failed to register capture listener")?;
 
-    let mut params = audio_params(audio_info())?;
-
-    stream
-        .connect(
-            spa::utils::Direction::Input,
-            None,
-            pw::stream::StreamFlags::AUTOCONNECT
-                | pw::stream::StreamFlags::MAP_BUFFERS
-                | pw::stream::StreamFlags::RT_PROCESS,
-            &mut params,
-        )
-        .context("failed to connect capture stream")?;
+    with_audio_params(audio_info(), |params| {
+        stream
+            .connect(
+                spa::utils::Direction::Input,
+                None,
+                pw::stream::StreamFlags::AUTOCONNECT
+                    | pw::stream::StreamFlags::MAP_BUFFERS
+                    | pw::stream::StreamFlags::RT_PROCESS,
+                params,
+            )
+            .context("failed to connect capture stream")
+    })?;
 
     Ok(RegisteredCaptureStream {
         _stream: stream,
@@ -91,7 +93,7 @@ fn process_capture_buffer(
     params: &Arc<SharedDspParams>,
     virtual_queue: &Arc<SampleQueue>,
     monitor_queue: Option<&Arc<SampleQueue>>,
-    events: &Sender<AudioEvent>,
+    level: &Arc<AtomicF32>,
 ) {
     let Some(mut buffer) = stream.dequeue_buffer() else {
         return;
@@ -142,7 +144,7 @@ fn process_capture_buffer(
         }
     }
 
-    let _ = events.send(AudioEvent::Level(peak));
+    level.store(peak, Ordering::Relaxed);
 }
 
 #[derive(Debug, Default)]

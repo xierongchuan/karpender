@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use atomic_float::AtomicF32;
 use std::{
     sync::{
         Arc,
@@ -14,7 +15,6 @@ use super::session::run_pipewire;
 
 #[derive(Debug, Clone)]
 pub enum AudioEvent {
-    Level(f32),
     Started,
     Stopped,
     Error(String),
@@ -23,6 +23,7 @@ pub enum AudioEvent {
 #[derive(Debug)]
 pub struct AudioEngine {
     stop: Arc<AtomicBool>,
+    level: Arc<AtomicF32>,
     handle: Option<JoinHandle<()>>,
 }
 
@@ -34,7 +35,9 @@ impl AudioEngine {
         monitor_output: bool,
     ) -> Result<Self> {
         let stop = Arc::new(AtomicBool::new(false));
+        let level = Arc::new(AtomicF32::new(0.0));
         let thread_stop = Arc::clone(&stop);
+        let thread_level = Arc::clone(&level);
         let handle = thread::Builder::new()
             .name("privacy-voice-pipewire".to_string())
             .spawn(move || {
@@ -43,6 +46,7 @@ impl AudioEngine {
                     dsp_params,
                     event_sender.clone(),
                     thread_stop,
+                    thread_level,
                     monitor_output,
                 );
                 if let Err(error) = result {
@@ -53,8 +57,13 @@ impl AudioEngine {
 
         Ok(Self {
             stop,
+            level,
             handle: Some(handle),
         })
+    }
+
+    pub fn level_meter(&self) -> Arc<AtomicF32> {
+        Arc::clone(&self.level)
     }
 
     pub fn stop(&mut self) {
@@ -67,6 +76,13 @@ impl AudioEngine {
 
 impl Drop for AudioEngine {
     fn drop(&mut self) {
-        self.stop();
+        self.stop.store(true, Ordering::Release);
+        if let Some(handle) = self.handle.take() {
+            let _ = thread::Builder::new()
+                .name("privacy-voice-pipewire-join".to_string())
+                .spawn(move || {
+                    let _ = handle.join();
+                });
+        }
     }
 }

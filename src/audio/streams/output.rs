@@ -6,7 +6,7 @@ use std::sync::{Arc, mpsc::Sender};
 use super::insert_audio_props;
 use crate::audio::{
     engine::AudioEvent,
-    format::{SAMPLE_SIZE, audio_info, audio_params},
+    format::{SAMPLE_SIZE, audio_info, with_audio_params},
     sample_queue::SampleQueue,
 };
 
@@ -42,18 +42,18 @@ pub(in crate::audio) fn create_monitor_stream<'c>(
         .register()
         .context("failed to register monitor playback listener")?;
 
-    let mut params = audio_params(audio_info())?;
-
-    stream
-        .connect(
-            spa::utils::Direction::Output,
-            None,
-            pw::stream::StreamFlags::AUTOCONNECT
-                | pw::stream::StreamFlags::MAP_BUFFERS
-                | pw::stream::StreamFlags::RT_PROCESS,
-            &mut params,
-        )
-        .context("failed to connect monitor playback stream")?;
+    with_audio_params(audio_info(), |params| {
+        stream
+            .connect(
+                spa::utils::Direction::Output,
+                None,
+                pw::stream::StreamFlags::AUTOCONNECT
+                    | pw::stream::StreamFlags::MAP_BUFFERS
+                    | pw::stream::StreamFlags::RT_PROCESS,
+                params,
+            )
+            .context("failed to connect monitor playback stream")
+    })?;
 
     Ok(RegisteredMonitorStream {
         _stream: stream,
@@ -95,18 +95,18 @@ pub(in crate::audio) fn create_virtual_source_stream<'c>(
         .register()
         .context("failed to register virtual microphone listener")?;
 
-    let mut params = audio_params(audio_info())?;
-
-    stream
-        .connect(
-            spa::utils::Direction::Output,
-            None,
-            pw::stream::StreamFlags::AUTOCONNECT
-                | pw::stream::StreamFlags::MAP_BUFFERS
-                | pw::stream::StreamFlags::RT_PROCESS,
-            &mut params,
-        )
-        .context("failed to connect virtual microphone stream")?;
+    with_audio_params(audio_info(), |params| {
+        stream
+            .connect(
+                spa::utils::Direction::Output,
+                None,
+                pw::stream::StreamFlags::AUTOCONNECT
+                    | pw::stream::StreamFlags::MAP_BUFFERS
+                    | pw::stream::StreamFlags::RT_PROCESS,
+                params,
+            )
+            .context("failed to connect virtual microphone stream")
+    })?;
 
     Ok(RegisteredSourceStream {
         _stream: stream,

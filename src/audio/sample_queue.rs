@@ -1,45 +1,61 @@
-use std::{collections::VecDeque, sync::Mutex};
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
 use super::format::SAMPLE_SIZE;
 
 #[derive(Debug)]
 pub(super) struct SampleQueue {
-    samples: Mutex<VecDeque<f32>>,
-    max_samples: usize,
+    samples: Box<[AtomicU32]>,
+    read: AtomicUsize,
+    write: AtomicUsize,
 }
 
 impl SampleQueue {
-    pub(super) fn with_capacity(capacity: usize, max_samples: usize) -> Self {
+    pub(super) fn with_capacity(_capacity: usize, max_samples: usize) -> Self {
+        let capacity = max_samples.max(1);
+        let samples = (0..capacity)
+            .map(|_| AtomicU32::new(0.0_f32.to_bits()))
+            .collect::<Vec<_>>()
+            .into_boxed_slice();
+
         Self {
-            samples: Mutex::new(VecDeque::with_capacity(capacity)),
-            max_samples,
+            samples,
+            read: AtomicUsize::new(0),
+            write: AtomicUsize::new(0),
         }
     }
 
     pub(super) fn push_sample(&self, sample: f32) {
-        let Ok(mut samples) = self.samples.try_lock() else {
-            return;
-        };
+        let write = self.write.load(Ordering::Relaxed);
 
-        if samples.len() >= self.max_samples {
-            samples.pop_front();
-        }
-        samples.push_back(sample);
+        self.samples[write % self.capacity()].store(sample.to_bits(), Ordering::Relaxed);
+        self.write.store(write.saturating_add(1), Ordering::Release);
     }
 
     pub(super) fn fill_bytes(&self, output: &mut [u8]) -> usize {
         let n_frames = output.len() / SAMPLE_SIZE;
-        let Ok(mut samples) = self.samples.try_lock() else {
-            output.fill(0);
-            return n_frames;
-        };
+        let write = self.write.load(Ordering::Acquire);
+        let mut read = self.read.load(Ordering::Relaxed);
+        if write.saturating_sub(read) > self.capacity() {
+            read = write - self.capacity();
+        }
 
         for frame in output.chunks_exact_mut(SAMPLE_SIZE) {
-            let sample = samples.pop_front().unwrap_or_default();
+            let sample = if read < write {
+                let bits = self.samples[read % self.capacity()].load(Ordering::Relaxed);
+                read = read.saturating_add(1);
+                f32::from_bits(bits)
+            } else {
+                0.0
+            };
             frame.copy_from_slice(&sample.to_le_bytes());
         }
 
+        self.read.store(read, Ordering::Release);
         n_frames
+    }
+
+    fn capacity(&self) -> usize {
+        self.samples.len()
     }
 }
 
