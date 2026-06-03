@@ -125,8 +125,9 @@ fn attach_audio_events(
 }
 
 fn stop_engine(state: &SharedWindowState, ui: &UiControls) {
+    set_start_button_appearance(ui);
     ui.start_button.set_sensitive(false);
-    ui.start_button.set_label("Stopping...");
+    ui.level.set_value(0.0);
 
     let (mut engine, session_id) = {
         let mut state = state.borrow_mut();
@@ -158,11 +159,15 @@ fn stop_engine(state: &SharedWindowState, ui: &UiControls) {
 }
 
 fn set_stopped_ui(ui: &UiControls) {
+    set_start_button_appearance(ui);
     ui.start_button.set_sensitive(true);
+    ui.level.set_value(0.0);
+}
+
+fn set_start_button_appearance(ui: &UiControls) {
     ui.start_button.set_label("Start Processing");
     ui.start_button.remove_css_class("destructive-action");
     ui.start_button.add_css_class("suggested-action");
-    ui.level.set_value(0.0);
 }
 
 fn stop_engine_in_background(mut engine: AudioEngine) {
