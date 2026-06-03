@@ -40,8 +40,8 @@ pub(super) fn connect_start_stop(
             return;
         };
 
+        set_starting_button_appearance(&ui_for_button);
         ui_for_button.start_button.set_sensitive(false);
-        ui_for_button.start_button.set_label("Starting...");
 
         let (sender, receiver) = mpsc::channel::<AudioEvent>();
         let monitor_output = state_for_button.borrow().config.monitor_output;
@@ -54,14 +54,8 @@ pub(super) fn connect_start_stop(
                     state.engine = Some(engine);
                     state.session_id
                 };
+                set_running_button_appearance(&ui_for_button);
                 ui_for_button.start_button.set_sensitive(true);
-                ui_for_button.start_button.set_label("Stop Processing");
-                ui_for_button
-                    .start_button
-                    .remove_css_class("suggested-action");
-                ui_for_button
-                    .start_button
-                    .add_css_class("destructive-action");
                 attach_audio_events(
                     receiver,
                     level,
@@ -71,8 +65,7 @@ pub(super) fn connect_start_stop(
                 );
             }
             Err(error) => {
-                ui_for_button.start_button.set_sensitive(true);
-                ui_for_button.start_button.set_label("Start Processing");
+                set_stopped_ui(&ui_for_button);
                 ui_for_button
                     .toast_overlay
                     .add_toast(adw::Toast::new(&format!("Failed to start audio: {error}")));
@@ -125,7 +118,7 @@ fn attach_audio_events(
 }
 
 fn stop_engine(state: &SharedWindowState, ui: &UiControls) {
-    set_start_button_appearance(ui);
+    set_stopping_button_appearance(ui);
     ui.start_button.set_sensitive(false);
     ui.level.set_value(0.0);
 
@@ -165,9 +158,35 @@ fn set_stopped_ui(ui: &UiControls) {
 }
 
 fn set_start_button_appearance(ui: &UiControls) {
-    ui.start_button.set_label("Start Processing");
+    ui.start_button
+        .set_icon_name("media-playback-start-symbolic");
+    ui.start_button.set_tooltip_text(Some("Start Processing"));
     ui.start_button.remove_css_class("destructive-action");
     ui.start_button.add_css_class("suggested-action");
+}
+
+fn set_starting_button_appearance(ui: &UiControls) {
+    ui.start_button
+        .set_icon_name("media-playback-start-symbolic");
+    ui.start_button.set_tooltip_text(Some("Starting..."));
+    ui.start_button.remove_css_class("destructive-action");
+    ui.start_button.add_css_class("suggested-action");
+}
+
+fn set_running_button_appearance(ui: &UiControls) {
+    ui.start_button
+        .set_icon_name("media-playback-stop-symbolic");
+    ui.start_button.set_tooltip_text(Some("Stop Processing"));
+    ui.start_button.remove_css_class("suggested-action");
+    ui.start_button.add_css_class("destructive-action");
+}
+
+fn set_stopping_button_appearance(ui: &UiControls) {
+    ui.start_button
+        .set_icon_name("media-playback-stop-symbolic");
+    ui.start_button.set_tooltip_text(Some("Stopping..."));
+    ui.start_button.remove_css_class("suggested-action");
+    ui.start_button.add_css_class("destructive-action");
 }
 
 fn stop_engine_in_background(mut engine: AudioEngine) {
