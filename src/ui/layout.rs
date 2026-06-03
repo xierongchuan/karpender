@@ -217,7 +217,7 @@ fn switch(active: bool) -> gtk::Switch {
 fn start_button() -> gtk::Button {
     let button = gtk::Button::from_icon_name("media-playback-start-symbolic");
     button.add_css_class("suggested-action");
-    button.set_tooltip_text(Some("Start Processing"));
+    button.set_tooltip_text(Some("Start Processing (Ctrl+K)"));
     button
 }
 

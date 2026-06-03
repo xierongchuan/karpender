@@ -160,7 +160,8 @@ fn set_stopped_ui(ui: &UiControls) {
 fn set_start_button_appearance(ui: &UiControls) {
     ui.start_button
         .set_icon_name("media-playback-start-symbolic");
-    ui.start_button.set_tooltip_text(Some("Start Processing"));
+    ui.start_button
+        .set_tooltip_text(Some("Start Processing (Ctrl+K)"));
     ui.start_button.remove_css_class("destructive-action");
     ui.start_button.add_css_class("suggested-action");
 }
@@ -168,7 +169,8 @@ fn set_start_button_appearance(ui: &UiControls) {
 fn set_starting_button_appearance(ui: &UiControls) {
     ui.start_button
         .set_icon_name("media-playback-start-symbolic");
-    ui.start_button.set_tooltip_text(Some("Starting..."));
+    ui.start_button
+        .set_tooltip_text(Some("Starting... (Ctrl+K)"));
     ui.start_button.remove_css_class("destructive-action");
     ui.start_button.add_css_class("suggested-action");
 }
@@ -176,7 +178,8 @@ fn set_starting_button_appearance(ui: &UiControls) {
 fn set_running_button_appearance(ui: &UiControls) {
     ui.start_button
         .set_icon_name("media-playback-stop-symbolic");
-    ui.start_button.set_tooltip_text(Some("Stop Processing"));
+    ui.start_button
+        .set_tooltip_text(Some("Stop Processing (Ctrl+K)"));
     ui.start_button.remove_css_class("suggested-action");
     ui.start_button.add_css_class("destructive-action");
 }
@@ -184,7 +187,8 @@ fn set_running_button_appearance(ui: &UiControls) {
 fn set_stopping_button_appearance(ui: &UiControls) {
     ui.start_button
         .set_icon_name("media-playback-stop-symbolic");
-    ui.start_button.set_tooltip_text(Some("Stopping..."));
+    ui.start_button
+        .set_tooltip_text(Some("Stopping... (Ctrl+K)"));
     ui.start_button.remove_css_class("suggested-action");
     ui.start_button.add_css_class("destructive-action");
 }
