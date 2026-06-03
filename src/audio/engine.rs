@@ -94,9 +94,9 @@ fn run_pipewire(
     let core = context
         .connect_rc(None)
         .context("failed to connect to PipeWire")?;
-    let virtual_queue = Arc::new(Mutex::new(VecDeque::<f32>::with_capacity(4096)));
+    let virtual_queue = Arc::new(SampleQueue::with_capacity(4096, MAX_BUFFERED_SAMPLES));
     let monitor_queue =
-        monitor_output.then(|| Arc::new(Mutex::new(VecDeque::<f32>::with_capacity(4096))));
+        monitor_output.then(|| Arc::new(SampleQueue::with_capacity(4096, MAX_BUFFERED_SAMPLES)));
 
     let capture_stream = create_capture_stream(
         &core,
@@ -143,8 +143,8 @@ fn run_pipewire(
 fn create_capture_stream<'c>(
     core: &'c pw::core::Core,
     input_node_id: u32,
-    virtual_queue: &Arc<Mutex<VecDeque<f32>>>,
-    monitor_queue: Option<&Arc<Mutex<VecDeque<f32>>>>,
+    virtual_queue: &Arc<SampleQueue>,
+    monitor_queue: Option<&Arc<SampleQueue>>,
     dsp_params: &Arc<SharedDspParams>,
     event_sender: &Sender<AudioEvent>,
 ) -> Result<RegisteredCaptureStream<'c>> {
@@ -177,10 +177,10 @@ fn create_capture_stream<'c>(
             }
         })
         .param_changed(|_, user_data, id, param| {
-            if let Some(param) = param {
-                if id == pw::spa::param::ParamType::Format.as_raw() {
-                    let _ = user_data.format.parse(param);
-                }
+            if let Some(param) = param
+                && id == pw::spa::param::ParamType::Format.as_raw()
+            {
+                let _ = user_data.format.parse(param);
             }
         })
         .process(move |stream, user_data| {
@@ -220,20 +220,16 @@ fn create_capture_stream<'c>(
                 for channel in 0..n_channels {
                     let start = channel * SAMPLE_SIZE;
                     let bytes = &frame[start..start + SAMPLE_SIZE];
-                    mono += f32::from_le_bytes(bytes.try_into().unwrap_or([0; SAMPLE_SIZE]));
+                    mono += f32_from_le_slice(bytes);
                 }
                 mono /= n_channels as f32;
 
                 let processed = processor.process_sample(mono, &params);
                 peak = peak.max(processed.abs());
 
-                if let Ok(mut queue) = virtual_queue.try_lock() {
-                    push_sample(&mut queue, processed);
-                }
+                virtual_queue.push_sample(processed);
                 if let Some(monitor_queue) = &monitor_queue {
-                    if let Ok(mut queue) = monitor_queue.try_lock() {
-                        push_sample(&mut queue, processed);
-                    }
+                    monitor_queue.push_sample(processed);
                 }
             }
 
@@ -267,7 +263,7 @@ fn create_capture_stream<'c>(
 
 fn create_monitor_stream<'c>(
     core: &'c pw::core::Core,
-    sample_queue: &Arc<Mutex<VecDeque<f32>>>,
+    sample_queue: &Arc<SampleQueue>,
     event_sender: &Sender<AudioEvent>,
 ) -> Result<RegisteredMonitorStream<'c>> {
     let mut stream_props = properties! {
@@ -324,7 +320,7 @@ fn create_monitor_stream<'c>(
 
 fn create_virtual_source_stream<'c>(
     core: &'c pw::core::Core,
-    sample_queue: &Arc<Mutex<VecDeque<f32>>>,
+    sample_queue: &Arc<SampleQueue>,
     event_sender: &Sender<AudioEvent>,
 ) -> Result<RegisteredSourceStream<'c>> {
     let mut stream_props = properties! {
@@ -381,7 +377,7 @@ fn create_virtual_source_stream<'c>(
     })
 }
 
-fn fill_output_buffer(stream: &pw::stream::Stream, sample_queue: &Arc<Mutex<VecDeque<f32>>>) {
+fn fill_output_buffer(stream: &pw::stream::Stream, sample_queue: &Arc<SampleQueue>) {
     let Some(mut buffer) = stream.dequeue_buffer() else {
         return;
     };
@@ -395,16 +391,7 @@ fn fill_output_buffer(stream: &pw::stream::Stream, sample_queue: &Arc<Mutex<VecD
         return;
     };
 
-    let n_frames = slice.len() / SAMPLE_SIZE;
-    if let Ok(mut queue) = sample_queue.try_lock() {
-        for frame_index in 0..n_frames {
-            let sample = queue.pop_front().unwrap_or(0.0);
-            let start = frame_index * SAMPLE_SIZE;
-            slice[start..start + SAMPLE_SIZE].copy_from_slice(&sample.to_le_bytes());
-        }
-    } else {
-        slice.fill(0);
-    }
+    let n_frames = sample_queue.fill_bytes(slice);
 
     let chunk = data.chunk_mut();
     *chunk.offset_mut() = 0;
@@ -412,11 +399,53 @@ fn fill_output_buffer(stream: &pw::stream::Stream, sample_queue: &Arc<Mutex<VecD
     *chunk.size_mut() = (n_frames * SAMPLE_SIZE) as _;
 }
 
-fn push_sample(queue: &mut VecDeque<f32>, sample: f32) {
-    if queue.len() >= MAX_BUFFERED_SAMPLES {
-        queue.pop_front();
+#[derive(Debug)]
+struct SampleQueue {
+    samples: Mutex<VecDeque<f32>>,
+    max_samples: usize,
+}
+
+impl SampleQueue {
+    fn with_capacity(capacity: usize, max_samples: usize) -> Self {
+        Self {
+            samples: Mutex::new(VecDeque::with_capacity(capacity)),
+            max_samples,
+        }
     }
-    queue.push_back(sample);
+
+    fn push_sample(&self, sample: f32) {
+        let Ok(mut samples) = self.samples.try_lock() else {
+            return;
+        };
+
+        if samples.len() >= self.max_samples {
+            samples.pop_front();
+        }
+        samples.push_back(sample);
+    }
+
+    fn fill_bytes(&self, output: &mut [u8]) -> usize {
+        let n_frames = output.len() / SAMPLE_SIZE;
+        let Ok(mut samples) = self.samples.try_lock() else {
+            output.fill(0);
+            return n_frames;
+        };
+
+        for frame in output.chunks_exact_mut(SAMPLE_SIZE) {
+            let sample = samples.pop_front().unwrap_or_default();
+            frame.copy_from_slice(&sample.to_le_bytes());
+        }
+
+        n_frames
+    }
+}
+
+fn f32_from_le_slice(bytes: &[u8]) -> f32 {
+    let Ok(sample) = bytes.try_into() else {
+        return 0.0;
+    };
+
+    f32::from_le_bytes(sample)
 }
 
 fn audio_params(audio_info: spa::param::audio::AudioInfoRaw) -> Result<[&'static Pod; 1]> {
@@ -439,19 +468,10 @@ fn audio_params(audio_info: spa::param::audio::AudioInfoRaw) -> Result<[&'static
     Ok([pod])
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct CaptureData {
     format: spa::param::audio::AudioInfoRaw,
     processor: VoiceProcessor,
-}
-
-impl Default for CaptureData {
-    fn default() -> Self {
-        Self {
-            format: Default::default(),
-            processor: VoiceProcessor::default(),
-        }
-    }
 }
 
 struct RegisteredCaptureStream<'c> {
@@ -467,4 +487,41 @@ struct RegisteredSourceStream<'c> {
 struct RegisteredMonitorStream<'c> {
     _stream: pw::stream::StreamBox<'c>,
     _listener: pw::stream::StreamListener<()>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sample_queue_drops_oldest_samples_when_full() {
+        let queue = SampleQueue::with_capacity(2, 2);
+        queue.push_sample(0.25);
+        queue.push_sample(0.5);
+        queue.push_sample(0.75);
+
+        let mut output = vec![0; SAMPLE_SIZE * 2];
+        assert_eq!(queue.fill_bytes(&mut output), 2);
+
+        let first = f32_from_le_slice(&output[..SAMPLE_SIZE]);
+        let second = f32_from_le_slice(&output[SAMPLE_SIZE..]);
+
+        assert_eq!(first, 0.5);
+        assert_eq!(second, 0.75);
+    }
+
+    #[test]
+    fn sample_queue_zero_fills_when_empty() {
+        let queue = SampleQueue::with_capacity(2, 2);
+        let mut output = vec![255; SAMPLE_SIZE * 2];
+
+        assert_eq!(queue.fill_bytes(&mut output), 2);
+
+        assert!(output.iter().all(|byte| *byte == 0));
+    }
+
+    #[test]
+    fn short_sample_slice_decodes_as_silence() {
+        assert_eq!(f32_from_le_slice(&[1, 2]), 0.0);
+    }
 }

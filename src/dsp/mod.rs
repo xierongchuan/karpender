@@ -850,9 +850,10 @@ mod tests {
     }
 
     fn seeded_processor() -> VoiceProcessor {
-        let mut processor = VoiceProcessor::default();
-        processor.jitter_seed = 0x1234_5678;
-        processor.noise_seed = 0x8765_4321;
-        processor
+        VoiceProcessor {
+            jitter_seed: 0x1234_5678,
+            noise_seed: 0x8765_4321,
+            ..VoiceProcessor::default()
+        }
     }
 }

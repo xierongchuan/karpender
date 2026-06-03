@@ -15,7 +15,11 @@ const APP_ISSUES: &str = "https://github.com/xierongchuan/karpender/issues";
 const LOCAL_ICON_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/data/icons");
 
 pub fn run() {
-    adw::init().expect("failed to initialize libadwaita");
+    if let Err(error) = adw::init() {
+        eprintln!("failed to initialize libadwaita: {error}");
+        return;
+    }
+
     register_app_icon();
 
     let app = adw::Application::builder().application_id(APP_ID).build();

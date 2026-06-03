@@ -1,5 +1,6 @@
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::{fs, path::PathBuf};
+use std::{fs, io::ErrorKind, path::PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
@@ -56,6 +57,35 @@ impl Default for AppConfig {
     }
 }
 
+impl VoiceMode {
+    pub const ALL: [Self; 4] = [
+        Self::Masked,
+        Self::BrightStranger,
+        Self::DeepMorph,
+        Self::CinematicHigh,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Masked => "Masked Voice",
+            Self::BrightStranger => "Bright Stranger",
+            Self::DeepMorph => "Deep Morph",
+            Self::CinematicHigh => "Cinematic High",
+        }
+    }
+
+    pub fn index(self) -> usize {
+        Self::ALL
+            .iter()
+            .position(|mode| *mode == self)
+            .unwrap_or_default()
+    }
+
+    pub fn from_index(index: usize) -> Self {
+        Self::ALL.get(index).copied().unwrap_or_default()
+    }
+}
+
 impl AppConfig {
     pub fn apply_profile(&mut self, profile: &VoiceProfile) {
         self.gain = profile.gain;
@@ -79,79 +109,38 @@ impl AppConfig {
     }
 }
 
-pub fn built_in_profiles() -> Vec<VoiceProfile> {
-    vec![
-        VoiceProfile {
-            id: "balanced-mask".to_string(),
-            name: "Balanced Mask".to_string(),
-            gain: 1.25,
-            noise_gate: 0.06,
-            robot_amount: 0.62,
-            monotone: false,
-            voice_mode: VoiceMode::Masked,
-        },
-        VoiceProfile {
-            id: "deep-morph".to_string(),
-            name: "Deep Morph".to_string(),
-            gain: 1.7,
-            noise_gate: 0.1,
-            robot_amount: 0.94,
-            monotone: true,
-            voice_mode: VoiceMode::DeepMorph,
-        },
-        VoiceProfile {
-            id: "cinematic-high".to_string(),
-            name: "Cinematic High".to_string(),
-            gain: 1.45,
-            noise_gate: 0.08,
-            robot_amount: 0.98,
-            monotone: true,
-            voice_mode: VoiceMode::CinematicHigh,
-        },
-        VoiceProfile {
-            id: "strong-privacy".to_string(),
-            name: "Strong Privacy".to_string(),
-            gain: 2.2,
-            noise_gate: 0.16,
-            robot_amount: 0.95,
-            monotone: true,
-            voice_mode: VoiceMode::Masked,
-        },
-        VoiceProfile {
-            id: "bright-stranger".to_string(),
-            name: "Bright Stranger".to_string(),
-            gain: 1.45,
-            noise_gate: 0.08,
-            robot_amount: 0.78,
-            monotone: false,
-            voice_mode: VoiceMode::BrightStranger,
-        },
-    ]
-}
-
-pub fn load() -> AppConfig {
+pub fn load() -> Result<AppConfig> {
     let Some(path) = config_path() else {
-        return AppConfig::default();
+        return Ok(AppConfig::default());
     };
 
-    fs::read_to_string(path)
-        .ok()
-        .and_then(|raw| serde_json::from_str(&raw).ok())
-        .unwrap_or_default()
+    let raw = match fs::read_to_string(&path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(AppConfig::default()),
+        Err(error) => {
+            return Err(error).with_context(|| {
+                format!("failed to read settings from {}", path.as_path().display())
+            });
+        }
+    };
+
+    serde_json::from_str(&raw)
+        .with_context(|| format!("failed to parse settings from {}", path.as_path().display()))
 }
 
-pub fn save(config: &AppConfig) {
+pub fn save(config: &AppConfig) -> Result<()> {
     let Some(path) = config_path() else {
-        return;
+        return Ok(());
     };
 
     if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create settings directory {}", parent.display()))?;
     }
 
-    if let Ok(raw) = serde_json::to_string_pretty(config) {
-        let _ = fs::write(path, raw);
-    }
+    let raw = serde_json::to_string_pretty(config).context("failed to serialize settings")?;
+    fs::write(&path, raw)
+        .with_context(|| format!("failed to write settings to {}", path.as_path().display()))
 }
 
 fn config_path() -> Option<PathBuf> {
