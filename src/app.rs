@@ -1,4 +1,4 @@
-use adw::prelude::*;
+use adw::{Application, prelude::*};
 use gtk::gio;
 use std::path::Path;
 
@@ -22,10 +22,10 @@ pub fn run() {
 
     register_app_icon();
 
-    let app = adw::Application::builder().application_id(APP_ID).build();
+    let app: Application = Application::builder().application_id(APP_ID).build();
 
     app.add_action_entries([gio::ActionEntry::builder("about")
-        .activate(|app: &adw::Application, _, _| {
+        .activate(|app: &Application, _, _| {
             let about = adw::AboutDialog::new();
             about.set_application_name(APP_NAME);
             about.set_application_icon(APP_ID);
