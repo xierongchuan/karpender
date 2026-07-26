@@ -1,78 +1,80 @@
-use crate::config::VoiceMode;
-
 use super::{
-    DEFAULT_SAMPLE_RATE, PITCH_BUFFER, PITCH_WINDOW, TWO_PI,
-    math::{
-        advance_pitch_phase, effective_privacy, input_drive, raised_cosine, smoothstep, soft_clip,
-    },
+    CONTROL_INTERVAL, DEFAULT_SAMPLE_RATE, MIN_GRAIN,
+    biquad::DcBlocker,
+    formant::{BAND_COUNT, FormantShaper},
+    identity::SessionIdentity,
+    math::{effective_privacy, input_drive, one_pole_coeff, ratio_blend, smoothstep, soft_clip},
     noise::{initial_jitter_seed, xorshift32},
     params::SharedDspParams,
-    recipe::pitch_recipe,
+    pitch::{PitchShifter, grain_window},
+    recipe::{VoiceRecipe, voice_recipe},
+    tracker::PitchTracker,
 };
 
 const MIN_EXPANDER_GAIN: f32 = 0.48;
+/// Pitch correction range, about minus seven to plus eight semitones. Wider than
+/// this and the delay line shifter starts to sound like a cartoon.
+const MIN_PITCH_RATIO: f32 = 0.66;
+const MAX_PITCH_RATIO: f32 = 1.58;
+/// The shaper can move formants by roughly plus or minus five semitones before
+/// the eight band cascade runs out of resolution.
+const MIN_SHAPE_RATIO: f32 = 0.72;
+const MAX_SHAPE_RATIO: f32 = 1.40;
+const ENVELOPE_REMAP_STRENGTH: f32 = 0.85;
 
 #[derive(Debug)]
 pub struct VoiceProcessor {
-    pub(super) pitch_buffer: Vec<f32>,
-    write_pos: usize,
-    down_phase: f32,
-    up_phase: f32,
-    body_state: f32,
-    speech_state: f32,
-    prosody_state: f32,
-    formant_state: f32,
-    consonant_state: f32,
+    dc_blocker: DcBlocker,
+    tracker: PitchTracker,
+    shifter: PitchShifter,
+    shaper: FormantShaper,
+    identity: SessionIdentity,
+    color_db: [f32; BAND_COUNT],
+    control_countdown: usize,
+    pitch_ratio: f32,
+    target_pitch_ratio: f32,
+    shape_ratio: f32,
+    target_shape_ratio: f32,
+    target_grain: f32,
+    ratio_coefficient: f32,
+    breath_level: f32,
+    target_breath_level: f32,
     expander_envelope: f32,
     expander_gain: f32,
     compressor_envelope: f32,
-    doubler_phase: f32,
-    color_phase: f32,
-    jitter_value: f32,
-    jitter_timer: u32,
-    pub(super) jitter_seed: u32,
-    pub(super) noise_seed: u32,
-    noise_state: f32,
-    fricative_state: f32,
-    morph_state: f32,
-    accent_value: f32,
-    accent_timer: u32,
     output_envelope: f32,
     output_gain: f32,
-    allpass_x1: f32,
-    allpass_y1: f32,
+    pub(super) noise_seed: u32,
+    noise_state: f32,
 }
 
 impl Default for VoiceProcessor {
     fn default() -> Self {
         Self {
-            pitch_buffer: vec![0.0; PITCH_BUFFER],
-            write_pos: 0,
-            down_phase: 0.0,
-            up_phase: 0.5,
-            body_state: 0.0,
-            speech_state: 0.0,
-            prosody_state: 0.0,
-            formant_state: 0.0,
-            consonant_state: 0.0,
+            dc_blocker: DcBlocker::default(),
+            tracker: PitchTracker::default(),
+            shifter: PitchShifter::default(),
+            shaper: FormantShaper::default(),
+            identity: SessionIdentity::default(),
+            color_db: [0.0; BAND_COUNT],
+            control_countdown: 0,
+            pitch_ratio: 1.0,
+            target_pitch_ratio: 1.0,
+            shape_ratio: 1.0,
+            target_shape_ratio: 1.0,
+            target_grain: MIN_GRAIN,
+            // About 45 ms to glide to a new ratio: fast enough to follow a
+            // sentence, slow enough to stay free of zipper noise.
+            ratio_coefficient: one_pole_coeff(0.045),
+            breath_level: 0.0,
+            target_breath_level: 0.0,
             expander_envelope: 0.0,
             expander_gain: 1.0,
             compressor_envelope: 0.0,
-            doubler_phase: 0.0,
-            color_phase: 0.0,
-            jitter_value: 0.0,
-            jitter_timer: 0,
-            jitter_seed: initial_jitter_seed(),
-            noise_seed: initial_jitter_seed() ^ 0x85eb_ca6b,
-            noise_state: 0.0,
-            fricative_state: 0.0,
-            morph_state: 0.0,
-            accent_value: 0.0,
-            accent_timer: 0,
             output_envelope: 0.0,
             output_gain: 1.0,
-            allpass_x1: 0.0,
-            allpass_y1: 0.0,
+            noise_seed: initial_jitter_seed() ^ 0x85eb_ca6b,
+            noise_state: 0.0,
         }
     }
 }
@@ -81,61 +83,84 @@ impl VoiceProcessor {
     pub fn process_sample(&mut self, input: f32, params: &SharedDspParams) -> f32 {
         let params = params.snapshot();
         let privacy = effective_privacy(params.robot_amount);
-        let monotone_privacy = if params.monotone {
-            privacy.max(0.35)
-        } else {
-            privacy
-        };
-        let timbre_jitter = self.next_timbre_jitter(params.voice_mode, monotone_privacy);
-        let accent = self.next_accent(params.voice_mode, monotone_privacy);
-        let cleaned = self.noise_cleanup(input * input_drive(params.gain), params.noise_gate);
+        let recipe = voice_recipe(params.voice_mode);
 
-        let (down_ratio, up_ratio, down_weight, pitch_mix) =
-            pitch_recipe(params.voice_mode, monotone_privacy, timbre_jitter, accent);
-        self.pitch_buffer[self.write_pos] = cleaned;
-        let shifted_down = self.pitch_tap_pair(down_ratio, self.down_phase);
-        let shifted_up = self.pitch_tap_pair(up_ratio, self.up_phase);
-        self.down_phase = advance_pitch_phase(down_ratio, self.down_phase);
-        self.up_phase = advance_pitch_phase(up_ratio, self.up_phase);
-        self.write_pos = (self.write_pos + 1) % self.pitch_buffer.len();
+        let driven = self.dc_blocker.process(input * input_drive(params.gain));
+        let cleaned = self.noise_cleanup(driven, params.noise_gate);
 
-        let shifted = shifted_down * down_weight + shifted_up * (1.0 - down_weight);
-        let pitched = cleaned * (1.0 - pitch_mix) + shifted * pitch_mix;
-        let rotated =
-            self.phase_rotate(pitched, monotone_privacy, params.voice_mode, timbre_jitter);
-        let disguised = self.identity_mask(
-            rotated,
-            monotone_privacy,
-            params.voice_mode,
-            timbre_jitter,
-            accent,
-        );
-        let morphed = self.deep_morph(
-            disguised,
-            monotone_privacy,
-            params.voice_mode,
-            timbre_jitter,
-            accent,
-        );
-        let mut sample = self.speech_compress(morphed, monotone_privacy);
-        let flatten_amount = match params.voice_mode {
-            VoiceMode::Masked => monotone_privacy * 0.30,
-            VoiceMode::BrightStranger => monotone_privacy * 0.36,
-            VoiceMode::DeepMorph => 0.28 + monotone_privacy * 0.40,
-            VoiceMode::CinematicHigh => 0.50 + monotone_privacy * 0.42,
-        };
-        sample = self.flatten_personality(sample, flatten_amount);
+        self.tracker.observe(cleaned);
 
-        if params.monotone {
-            sample = self.flatten_personality(sample, 0.40 + monotone_privacy * 0.40);
+        if self.control_countdown == 0 {
+            self.update_controls(&recipe, privacy, params.monotone);
+            self.control_countdown = CONTROL_INTERVAL;
         }
+        self.control_countdown -= 1;
 
-        let leveled = self.stabilize_loudness(sample, params.voice_mode);
+        self.pitch_ratio += self.ratio_coefficient * (self.target_pitch_ratio - self.pitch_ratio);
+        self.shape_ratio += self.ratio_coefficient * (self.target_shape_ratio - self.shape_ratio);
+        self.breath_level += 0.0015 * (self.target_breath_level - self.breath_level);
+
+        let shifted = self
+            .shifter
+            .process(cleaned, self.pitch_ratio, self.target_grain);
+        self.shaper.observe(shifted);
+        let shaped = self.shaper.process(shifted);
+        let breathed = shaped + self.next_soft_noise() * self.breath_level;
+        let compressed = self.speech_compress(breathed, privacy);
+        let leveled = self.stabilize_loudness(compressed, recipe.output_level, params.monotone);
 
         soft_clip(leveled).clamp(-1.0, 1.0)
     }
 
-    fn noise_cleanup(&mut self, input: f32, threshold: f32) -> f32 {
+    /// Everything that only needs to move at control rate. Running this once per
+    /// 64 samples keeps the per sample path down to filters and delay reads.
+    fn update_controls(&mut self, recipe: &VoiceRecipe, privacy: f32, monotone: bool) {
+        self.identity.advance(CONTROL_INTERVAL);
+
+        let normalize = if monotone {
+            recipe.normalize.max(0.9)
+        } else {
+            recipe.normalize * (0.30 + 0.70 * privacy)
+        }
+        .clamp(0.0, 1.0);
+
+        let target_f0 =
+            recipe.target_f0 * semitone_ratio(self.identity.pitch_semitones(privacy)).max(0.1);
+        let detected = self.tracker.frequency();
+        if detected > 0.0 {
+            let wanted = (target_f0 / detected).clamp(MIN_PITCH_RATIO, MAX_PITCH_RATIO);
+            self.target_pitch_ratio = ratio_blend(1.0, wanted, normalize);
+        }
+
+        // The shifter needs the period of its own input, which is the detected
+        // pitch, to keep its grain phase aligned.
+        let period = if detected > 0.0 {
+            DEFAULT_SAMPLE_RATE as f32 / detected
+        } else {
+            0.0
+        };
+        self.target_grain = grain_window(period);
+
+        let wanted_formant = recipe.formant_ratio * self.identity.formant_ratio(privacy);
+        self.target_shape_ratio =
+            (wanted_formant / self.target_pitch_ratio).clamp(MIN_SHAPE_RATIO, MAX_SHAPE_RATIO);
+
+        self.identity.color_db(privacy, &mut self.color_db);
+        let tilt = recipe.tilt_db + self.identity.tilt_db(privacy);
+        self.shaper.update(
+            self.shape_ratio,
+            ENVELOPE_REMAP_STRENGTH,
+            tilt,
+            &self.color_db,
+        );
+
+        // Breath only follows voiced speech, so silence stays silent.
+        let voiced =
+            smoothstep(self.tracker.confidence() * 1.6) * (self.output_envelope * 6.0).min(1.0);
+        self.target_breath_level = recipe.breath * voiced * (0.4 + 0.6 * privacy);
+    }
+
+    pub(super) fn noise_cleanup(&mut self, input: f32, threshold: f32) -> f32 {
         let threshold = threshold.clamp(0.0, 0.4);
         let strength = threshold / 0.4;
         if strength <= 0.003 {
@@ -163,177 +188,7 @@ impl VoiceProcessor {
         };
         self.expander_gain += gain_coeff * (target_gain - self.expander_gain);
 
-        let expanded = input * self.expander_gain;
-        input * (1.0 - strength * 0.22) + expanded * strength * 0.22
-    }
-
-    fn pitch_tap_pair(&self, ratio: f32, phase: f32) -> f32 {
-        let first = self.pitch_tap(ratio, phase);
-        let second_phase = (phase + 0.5).fract();
-        let second = self.pitch_tap(ratio, second_phase);
-        let fade = raised_cosine(phase);
-
-        first * fade + second * (1.0 - fade)
-    }
-
-    fn pitch_tap(&self, ratio: f32, phase: f32) -> f32 {
-        let delay = if ratio < 1.0 {
-            phase * PITCH_WINDOW as f32
-        } else {
-            (1.0 - phase) * PITCH_WINDOW as f32
-        } + 64.0;
-
-        self.read_delay(delay)
-    }
-
-    pub(super) fn read_delay(&self, delay: f32) -> f32 {
-        let len = self.pitch_buffer.len() as f32;
-        let read = (self.write_pos as f32 - delay).rem_euclid(len);
-        let floor = read.floor();
-        let i0 = floor as usize % self.pitch_buffer.len();
-        let i1 = (i0 + 1) % self.pitch_buffer.len();
-        let frac = read - floor;
-
-        self.pitch_buffer[i0] * (1.0 - frac) + self.pitch_buffer[i1] * frac
-    }
-
-    fn identity_mask(
-        &mut self,
-        input: f32,
-        privacy: f32,
-        mode: VoiceMode,
-        timbre_jitter: f32,
-        accent: f32,
-    ) -> f32 {
-        self.body_state += 0.026 * (input - self.body_state);
-        self.formant_state += 0.075 * (input - self.formant_state);
-        self.speech_state += 0.18 * (input - self.speech_state);
-        self.consonant_state += 0.42 * (input - self.consonant_state);
-        let body = self.body_state;
-        let low_mids = self.formant_state - self.body_state;
-        let high_mids = self.speech_state - self.formant_state;
-        let consonants = input - self.consonant_state;
-
-        self.color_phase += TWO_PI * (0.09 + privacy * 0.08) / DEFAULT_SAMPLE_RATE as f32;
-        if self.color_phase >= TWO_PI {
-            self.color_phase -= TWO_PI;
-        }
-        let color = self.color_phase.sin();
-
-        let mode_brightness = match mode {
-            VoiceMode::Masked => 0.0,
-            VoiceMode::BrightStranger => 1.0,
-            VoiceMode::DeepMorph => 1.7,
-            VoiceMode::CinematicHigh => 2.5,
-        };
-
-        let short_delay = self.read_delay(
-            300.0 + privacy * 360.0 + color * 45.0 + timbre_jitter * 70.0 + accent * 95.0,
-        );
-        self.doubler_phase += TWO_PI * (0.31 + privacy * 0.17) / DEFAULT_SAMPLE_RATE as f32;
-        if self.doubler_phase >= TWO_PI {
-            self.doubler_phase -= TWO_PI;
-        }
-        let moving_delay = self.read_delay(
-            620.0 + self.doubler_phase.sin() * 130.0 + timbre_jitter * 95.0 - accent * 120.0,
-        );
-        let doubler = (short_delay * 0.58 + moving_delay * 0.42)
-            * (0.18 + privacy * 0.34 + mode_brightness * 0.06 + accent.abs() * 0.06);
-
-        let jitter_color = timbre_jitter * privacy;
-        let body_weight = 0.70 - privacy * (0.28 + mode_brightness * 0.12)
-            + color * privacy * 0.08
-            + jitter_color * 0.08
-            + accent * 0.10;
-        let low_mid_weight = 0.54 - privacy * (0.34 + mode_brightness * 0.08);
-        let high_mid_weight = 0.42
-            - privacy * (0.28 - mode_brightness * 0.10)
-            - color * privacy * 0.06
-            - jitter_color * 0.07
-            - accent * 0.12;
-        let consonant_weight =
-            1.12 + privacy * (0.36 + mode_brightness * 0.18) + accent.abs() * 0.18;
-        let nasal_offset = (low_mids - high_mids)
-            * privacy
-            * (0.18 + color * 0.07 + jitter_color * 0.06 + accent * 0.09);
-
-        let masked = body * body_weight
-            + low_mids * low_mid_weight
-            + high_mids * high_mid_weight
-            + consonants * consonant_weight
-            + nasal_offset
-            + doubler;
-        let mix = (privacy * 0.88).min(0.92);
-
-        input * (1.0 - mix) + masked * mix
-    }
-
-    fn deep_morph(
-        &mut self,
-        input: f32,
-        privacy: f32,
-        mode: VoiceMode,
-        timbre_jitter: f32,
-        accent: f32,
-    ) -> f32 {
-        let depth = match mode {
-            VoiceMode::Masked => 0.18,
-            VoiceMode::BrightStranger => 0.38,
-            VoiceMode::DeepMorph => 1.0,
-            VoiceMode::CinematicHigh => 1.35,
-        } * privacy;
-
-        if depth <= 0.001 {
-            return input;
-        }
-
-        self.morph_state += 0.052 * (input - self.morph_state);
-        let morph_band = input - self.morph_state;
-        let warped = self.morph_state * (0.62 - depth * 0.24)
-            + morph_band * (1.18 + depth * 0.42 + timbre_jitter * 0.08 + accent * 0.10);
-
-        let consonant_energy = (input - self.consonant_state).abs();
-        self.fricative_state += 0.18 * (consonant_energy - self.fricative_state);
-        let transient = (consonant_energy - self.fricative_state * 1.55).max(0.0);
-        let fricative_gate = smoothstep((transient * 18.0).clamp(0.0, 1.0));
-        let consonant_rebuild = self.next_soft_noise()
-            * transient.min(0.16)
-            * fricative_gate
-            * depth
-            * (0.045 + accent.abs() * 0.025);
-        let shimmer = self
-            .read_delay(110.0 + 170.0 * privacy + timbre_jitter * 55.0 + accent * 70.0)
-            * depth
-            * (0.12 + accent.abs() * 0.06);
-        let accent_push = input * accent * depth * 0.18;
-
-        warped * (1.0 - depth * 0.10) + consonant_rebuild + shimmer + accent_push
-    }
-
-    fn phase_rotate(
-        &mut self,
-        input: f32,
-        privacy: f32,
-        mode: VoiceMode,
-        timbre_jitter: f32,
-    ) -> f32 {
-        let mode_offset = match mode {
-            VoiceMode::Masked => 0.0,
-            VoiceMode::BrightStranger => 0.10,
-            VoiceMode::DeepMorph => 0.20,
-            VoiceMode::CinematicHigh => 0.30,
-        };
-        let coefficient = (0.30
-            + privacy * (0.38 + mode_offset)
-            + self.color_phase.sin() * privacy * 0.04
-            + timbre_jitter * privacy * 0.07)
-            .clamp(0.05, 0.86);
-        let rotated = -coefficient * input + self.allpass_x1 + coefficient * self.allpass_y1;
-        self.allpass_x1 = input;
-        self.allpass_y1 = rotated;
-
-        let amount = privacy * (0.26 + mode_offset * 0.35);
-        input * (1.0 - amount) + rotated * amount
+        input * self.expander_gain
     }
 
     fn speech_compress(&mut self, input: f32, privacy: f32) -> f32 {
@@ -349,75 +204,16 @@ impl VoiceProcessor {
         let gain = if self.compressor_envelope > target {
             (target + (self.compressor_envelope - target) * 0.38) / self.compressor_envelope
         } else {
-            1.0 + privacy * 0.08
+            1.0
         };
         let amount = privacy * 0.65;
-        let applied_gain = 1.0 * (1.0 - amount) + gain * amount;
 
-        input * applied_gain
+        input * (1.0 - amount + gain * amount)
     }
 
-    fn flatten_personality(&mut self, input: f32, amount: f32) -> f32 {
-        let amount = amount.clamp(0.0, 0.72);
-        self.prosody_state += 0.0045 * (input - self.prosody_state);
-
-        let flattened = input - self.prosody_state * amount;
-        let clarity = flattened + (input - self.speech_state) * (0.06 + amount * 0.04);
-
-        clarity * (1.0 + amount * 0.08)
-    }
-
-    fn next_timbre_jitter(&mut self, mode: VoiceMode, privacy: f32) -> f32 {
-        if self.jitter_timer == 0 {
-            self.jitter_seed = xorshift32(self.jitter_seed);
-            let unit = (self.jitter_seed as f32 / u32::MAX as f32) * 2.0 - 1.0;
-            let range = match mode {
-                VoiceMode::Masked => 0.32,
-                VoiceMode::BrightStranger => 0.55,
-                VoiceMode::DeepMorph => 0.82,
-                VoiceMode::CinematicHigh => 1.05,
-            };
-            self.jitter_value = unit * privacy * range;
-            self.jitter_timer = match mode {
-                VoiceMode::Masked => DEFAULT_SAMPLE_RATE / 16,
-                VoiceMode::BrightStranger => DEFAULT_SAMPLE_RATE / 22,
-                VoiceMode::DeepMorph => DEFAULT_SAMPLE_RATE / 30,
-                VoiceMode::CinematicHigh => DEFAULT_SAMPLE_RATE / 24,
-            };
-        } else {
-            self.jitter_timer -= 1;
-        }
-
-        self.jitter_value
-    }
-
-    fn next_accent(&mut self, mode: VoiceMode, privacy: f32) -> f32 {
-        if self.accent_timer == 0 {
-            self.jitter_seed = xorshift32(self.jitter_seed ^ 0x27d4_eb2d);
-            let unit = (self.jitter_seed as f32 / u32::MAX as f32) * 2.0 - 1.0;
-            let amount = match mode {
-                VoiceMode::Masked => 0.10,
-                VoiceMode::BrightStranger => 0.18,
-                VoiceMode::DeepMorph => 0.28,
-                VoiceMode::CinematicHigh => 0.38,
-            };
-            self.accent_value = unit * privacy * amount;
-            let base = match mode {
-                VoiceMode::Masked => DEFAULT_SAMPLE_RATE / 9,
-                VoiceMode::BrightStranger => DEFAULT_SAMPLE_RATE / 11,
-                VoiceMode::DeepMorph => DEFAULT_SAMPLE_RATE / 13,
-                VoiceMode::CinematicHigh => DEFAULT_SAMPLE_RATE / 15,
-            };
-            let spread = (self.jitter_seed % (base / 2).max(1)).max(1);
-            self.accent_timer = base + spread;
-        } else {
-            self.accent_timer -= 1;
-        }
-
-        self.accent_value
-    }
-
-    fn stabilize_loudness(&mut self, input: f32, mode: VoiceMode) -> f32 {
+    /// Levels the output and, in monotone mode, also flattens the loudness
+    /// contour, which is one of the strongest speaker cues after pitch.
+    fn stabilize_loudness(&mut self, input: f32, target: f32, monotone: bool) -> f32 {
         let amplitude = input.abs();
         let coeff = if amplitude > self.output_envelope {
             0.035
@@ -426,22 +222,17 @@ impl VoiceProcessor {
         };
         self.output_envelope += coeff * (amplitude - self.output_envelope);
 
-        let target = match mode {
-            VoiceMode::Masked => 0.22,
-            VoiceMode::BrightStranger => 0.23,
-            VoiceMode::DeepMorph => 0.24,
-            VoiceMode::CinematicHigh => 0.24,
-        };
         let desired = if self.output_envelope > 0.018 {
             (target / self.output_envelope).clamp(0.45, 1.75)
         } else {
             1.0
         };
-        let gain_coeff = if desired < self.output_gain {
-            0.018
+        let (down, up) = if monotone {
+            (0.045, 0.012)
         } else {
-            0.003
+            (0.018, 0.003)
         };
+        let gain_coeff = if desired < self.output_gain { down } else { up };
         self.output_gain += gain_coeff * (desired - self.output_gain);
 
         input * self.output_gain
@@ -451,6 +242,47 @@ impl VoiceProcessor {
         self.noise_seed = xorshift32(self.noise_seed);
         let white = (self.noise_seed as f32 / u32::MAX as f32) * 2.0 - 1.0;
         self.noise_state += 0.12 * (white - self.noise_state);
+
         self.noise_state
     }
+
+    /// Deterministic instance for tests: the session identity is otherwise
+    /// seeded from the clock on purpose.
+    #[cfg(test)]
+    pub(super) fn seeded(seed: u32) -> Self {
+        Self {
+            identity: SessionIdentity::from_seed(seed),
+            noise_seed: seed ^ 0x8765_4321,
+            ..Self::default()
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn pitch_ratio(&self) -> f32 {
+        self.pitch_ratio
+    }
+
+    /// Delay of this instance right now, in samples. The grain follows the
+    /// tracked pitch, so a high voice costs noticeably less than a low one.
+    #[cfg(test)]
+    pub(super) fn current_delay_samples(&self) -> f32 {
+        self.shifter.delay_samples()
+    }
+
+    /// Worst case algorithmic delay of the chain in samples: the longest grain
+    /// the shifter can grow to plus its guard delay. Used by the latency test to
+    /// keep the chain honest.
+    #[cfg(test)]
+    pub(super) fn algorithmic_delay_samples() -> usize {
+        super::pitch::max_delay_samples() as usize
+    }
+
+    #[cfg(test)]
+    pub(super) fn algorithmic_delay_ms() -> f32 {
+        Self::algorithmic_delay_samples() as f32 * 1_000.0 / DEFAULT_SAMPLE_RATE as f32
+    }
+}
+
+fn semitone_ratio(semitones: f32) -> f32 {
+    (semitones / 12.0).exp2()
 }

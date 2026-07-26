@@ -184,6 +184,13 @@ fn voice_mode_dropdown(selected: VoiceMode) -> gtk::DropDown {
         .collect::<Vec<_>>();
     let dropdown = gtk::DropDown::from_strings(&labels);
     dropdown.set_selected(selected.index() as u32);
+    dropdown.set_tooltip_text(Some(selected.description()));
+    // Eight modes only help if it is clear what each of them does, so the hint
+    // follows the selection instead of hiding in the documentation.
+    dropdown.connect_selected_notify(|dropdown| {
+        let mode = VoiceMode::from_index(dropdown.selected() as usize);
+        dropdown.set_tooltip_text(Some(mode.description()));
+    });
     configure_dropdown(&dropdown);
     dropdown
 }

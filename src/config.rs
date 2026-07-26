@@ -39,6 +39,10 @@ pub enum VoiceMode {
     BrightStranger,
     DeepMorph,
     CinematicHigh,
+    WarmNeighbour,
+    CalmAndrogynous,
+    SoftAlto,
+    LowBaritone,
 }
 
 impl Default for AppConfig {
@@ -58,11 +62,15 @@ impl Default for AppConfig {
 }
 
 impl VoiceMode {
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 8] = [
         Self::Masked,
         Self::BrightStranger,
         Self::DeepMorph,
         Self::CinematicHigh,
+        Self::WarmNeighbour,
+        Self::CalmAndrogynous,
+        Self::SoftAlto,
+        Self::LowBaritone,
     ];
 
     pub fn label(self) -> &'static str {
@@ -71,6 +79,25 @@ impl VoiceMode {
             Self::BrightStranger => "Bright Stranger",
             Self::DeepMorph => "Deep Morph",
             Self::CinematicHigh => "Cinematic High",
+            Self::WarmNeighbour => "Warm Neighbour",
+            Self::CalmAndrogynous => "Calm Androgynous",
+            Self::SoftAlto => "Soft Alto",
+            Self::LowBaritone => "Low Baritone",
+        }
+    }
+
+    /// Short hint shown next to the mode picker so the modes are actually
+    /// distinguishable before trying them.
+    pub fn description(self) -> &'static str {
+        match self {
+            Self::Masked => "Neutral mid pitch, unchanged formants",
+            Self::BrightStranger => "Higher pitch with a brighter, smaller head",
+            Self::DeepMorph => "Low pitch with a larger, darker head",
+            Self::CinematicHigh => "High pitch, wide open and airy",
+            Self::WarmNeighbour => "Low mid pitch, warm and close",
+            Self::CalmAndrogynous => "Mid pitch, deliberately gender neutral",
+            Self::SoftAlto => "High mid pitch, soft and breathy",
+            Self::LowBaritone => "Lowest pitch, full chest resonance",
         }
     }
 
