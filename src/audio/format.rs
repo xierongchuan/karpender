@@ -8,7 +8,15 @@ use crate::dsp::DEFAULT_SAMPLE_RATE;
 
 pub(super) const CHANNELS: u32 = 1;
 pub(super) const SAMPLE_SIZE: usize = mem::size_of::<f32>();
-pub(super) const MAX_BUFFERED_SAMPLES: usize = DEFAULT_SAMPLE_RATE as usize;
+/// Ring size for the queues between capture and playback. It is a hard ceiling
+/// on how far the reader can fall behind, so it doubles as a latency ceiling:
+/// 100 ms is already generous next to the quantum we ask PipeWire for.
+pub(super) const MAX_BUFFERED_SAMPLES: usize = DEFAULT_SAMPLE_RATE as usize / 10;
+
+/// Quantum requested from the graph, about 5.3 ms at 48 kHz. PipeWire treats
+/// this as a hint and still honours the driver, but asking keeps the graph from
+/// settling on the default 1024 sample quantum when nothing else needs it.
+pub(super) const REQUESTED_QUANTUM: u32 = 256;
 
 pub(super) fn audio_info() -> spa::param::audio::AudioInfoRaw {
     let mut audio_info = spa::param::audio::AudioInfoRaw::new();

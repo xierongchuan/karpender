@@ -76,6 +76,10 @@ fn voice_mode_to_u8(mode: VoiceMode) -> u8 {
         VoiceMode::BrightStranger => 1,
         VoiceMode::DeepMorph => 2,
         VoiceMode::CinematicHigh => 3,
+        VoiceMode::WarmNeighbour => 4,
+        VoiceMode::CalmAndrogynous => 5,
+        VoiceMode::SoftAlto => 6,
+        VoiceMode::LowBaritone => 7,
     }
 }
 
@@ -84,6 +88,10 @@ fn voice_mode_from_u8(value: u8) -> VoiceMode {
         1 => VoiceMode::BrightStranger,
         2 => VoiceMode::DeepMorph,
         3 => VoiceMode::CinematicHigh,
+        4 => VoiceMode::WarmNeighbour,
+        5 => VoiceMode::CalmAndrogynous,
+        6 => VoiceMode::SoftAlto,
+        7 => VoiceMode::LowBaritone,
         _ => VoiceMode::Masked,
     }
 }

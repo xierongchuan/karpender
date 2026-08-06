@@ -72,6 +72,44 @@ const BUILT_IN_PROFILES: &[BuiltInProfile] = &[
         monotone: false,
         voice_mode: VoiceMode::BrightStranger,
     },
+    // Appended, never inserted: the dropdown index of a profile is what gets
+    // written into the config file as the active profile.
+    BuiltInProfile {
+        id: "warm-neighbour",
+        name: "Warm Neighbour",
+        gain: 1.3,
+        noise_gate: 0.07,
+        robot_amount: 0.55,
+        monotone: false,
+        voice_mode: VoiceMode::WarmNeighbour,
+    },
+    BuiltInProfile {
+        id: "calm-androgynous",
+        name: "Calm Androgynous",
+        gain: 1.35,
+        noise_gate: 0.08,
+        robot_amount: 0.85,
+        monotone: true,
+        voice_mode: VoiceMode::CalmAndrogynous,
+    },
+    BuiltInProfile {
+        id: "soft-alto",
+        name: "Soft Alto",
+        gain: 1.4,
+        noise_gate: 0.08,
+        robot_amount: 0.8,
+        monotone: false,
+        voice_mode: VoiceMode::SoftAlto,
+    },
+    BuiltInProfile {
+        id: "low-baritone",
+        name: "Low Baritone",
+        gain: 1.55,
+        noise_gate: 0.09,
+        robot_amount: 0.82,
+        monotone: false,
+        voice_mode: VoiceMode::LowBaritone,
+    },
 ];
 
 pub fn labels(config: &AppConfig) -> Vec<String> {
@@ -177,6 +215,10 @@ mod tests {
                 "Cinematic High",
                 "Strong Privacy",
                 "Bright Stranger",
+                "Warm Neighbour",
+                "Calm Androgynous",
+                "Soft Alto",
+                "Low Baritone",
             ]
         );
     }

@@ -12,12 +12,49 @@ physical mic -> Karpender DSP -> Karpender Privacy Voice Mic -> chat/recording a
 - PipeWire input source selection.
 - Virtual microphone output.
 - Voice anonymization with pitch/timbre/prosody changes.
+- Eight voice modes, each with its own pitch target and head size.
 - Noise Cleanup as a soft expander, not a hard gate.
 - Privacy Amount for stronger or lighter voice disguise.
 - Flatten Intonation mode for reducing recognizable prosody.
 - Monitor to Speakers mode for hearing the processed voice locally.
 
 Use headphones when testing monitor mode to avoid feedback.
+
+## Voice Modes
+
+Every mode sets its own target pitch and its own formant shift, so two modes at
+the same pitch still sound like two different people. The mode picker shows the
+same hint as a tooltip.
+
+| Mode | Character |
+| --- | --- |
+| Masked Voice | Neutral mid pitch, unchanged formants |
+| Bright Stranger | Higher pitch with a brighter, smaller head |
+| Deep Morph | Low pitch with a larger, darker head |
+| Cinematic High | High pitch, wide open and airy |
+| Warm Neighbour | Low mid pitch, warm and close |
+| Calm Androgynous | Mid pitch, deliberately gender neutral |
+| Soft Alto | High mid pitch, soft and breathy |
+| Low Baritone | Lowest pitch, full chest resonance |
+
+On top of the mode, every run of the app draws a private random identity: a
+small extra pitch offset, a formant offset, a spectral tilt and a per band
+colour. The same speaker in the same mode therefore does not produce the same
+voice twice, which is what makes a recording harder to match against another
+one.
+
+## Latency
+
+The processing path is built to stay inside a normal conversation:
+
+| Stage | Cost at 48 kHz |
+| --- | --- |
+| PipeWire quantum, requested by both streams | 256 samples, 5.3 ms per hop |
+| Pitch shifter grain, two periods of the tracked pitch | 664 samples at 150 Hz, 13.8 ms |
+| Queue cushion between capture and playback | 64 to 512 samples |
+
+The grain follows the voice, so a higher voice pays less. A deep voice at 83 Hz
+reaches the ceiling of 1176 samples, 24.5 ms.
 
 ## Requirements
 
